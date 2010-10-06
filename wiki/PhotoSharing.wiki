@@ -1,0 +1,6 @@
+#summary One-sentence summary of this page.
+#labels PhotoSharing,FileSharing,MyOtherDrive
+
+= PhotoSharing / FileSharing =
+
+Using an online service, like MyOtherDrive.com to share files amongst a group of individuals.
