@@ -1718,14 +1718,14 @@ public class TestJsonReaderWriter extends TestCase
         assertTrue("Hello, World".equals(qux[0]));
 
         // Whitespace
-        jr = new JsonReader(convertStringToInputStream(" [  {  \"@type\"  :  \"com.gaic.uwd.core.util.io.TestJsonReaderWriter$TestObject\"  ,  \"_name\"  :  \"alpha\"  ,  \"_other\"  :  null  }  ,  {  \"@type\"  :  \"com.gaic.uwd.core.util.io.TestJsonReaderWriter$TestObject\"  ,  \"_name\"  :  \"beta\"  ,  \"_other\" : null  }  ]  "));
+        jr = new JsonReader(convertStringToInputStream(" [  {  \"@type\"  :  \"com.cedarsoftware.util.io.TestJsonReaderWriter$TestObject\"  ,  \"_name\"  :  \"alpha\"  ,  \"_other\"  :  null  }  ,  {  \"@type\"  :  \"com.cedarsoftware.util.io.TestJsonReaderWriter$TestObject\"  ,  \"_name\"  :  \"beta\"  ,  \"_other\" : null  }  ]  "));
         Object[] fred = (Object[]) jr.readObject();
         assertTrue(fred != null);
         assertTrue(fred.length == 2);
         assertTrue(fred[0].equals(new TestObject("alpha")));
         assertTrue(fred[1].equals(new TestObject("beta")));
 
-        jr = new JsonReader(convertStringToInputStream("[{\"@type\":\"com.gaic.uwd.core.util.io.TestJsonReaderWriter$TestObject\",\"_name\" : \"alpha\" , \"_other\":null,\"fake\":\"_typeArray\"},{\"@type\": \"com.gaic.uwd.core.util.io.TestJsonReaderWriter$TestObject\",\"_name\":\"beta\",\"_other\":null}]"));
+        jr = new JsonReader(convertStringToInputStream("[{\"@type\":\"com.cedarsoftware.util.io.TestJsonReaderWriter$TestObject\",\"_name\" : \"alpha\" , \"_other\":null,\"fake\":\"_typeArray\"},{\"@type\": \"com.cedarsoftware.util.io.TestJsonReaderWriter$TestObject\",\"_name\":\"beta\",\"_other\":null}]"));
         Object[] wilma = (Object[]) jr.readObject();
         assertTrue(wilma != null);
         assertTrue(wilma.length == 2);
