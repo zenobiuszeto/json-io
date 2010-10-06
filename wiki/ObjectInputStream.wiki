@@ -1,0 +1,6 @@
+#summary One-sentence summary of this page.
+#labels Java,json-io,JDK
+
+= ObjectInputStream =
+
+See http://download-llnw.oracle.com/javase/6/docs/api/java/io/ObjectInputStream.html
