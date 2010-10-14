@@ -1,6 +1,8 @@
 package com.cedarsoftware.util.io;
 
-import java.awt.*;
+import junit.framework.TestCase;
+
+import java.awt.Rectangle;
 import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
@@ -26,29 +28,28 @@ import java.util.TreeMap;
 import java.util.TreeSet;
 import java.util.concurrent.ConcurrentHashMap;
 
-import junit.framework.TestCase;
-
 /**
  * Test cases for JsonReader / JsonWriter
+ *
  * @author John DeRegnaucourt (jdereg@gmail.com)
- * <br/>
- * Copyright [2010] John DeRegnaucourt
- * <br/><br/>
- * Licensed under the Apache License, Version 2.0 (the "License");
- * you may not use this file except in compliance with the License.
- * You may obtain a copy of the License at
- * <br/><br/>
- *    http://www.apache.org/licenses/LICENSE-2.0
- * <br/><br/>
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License. 
+ *         <br/>
+ *         Copyright [2010] John DeRegnaucourt
+ *         <br/><br/>
+ *         Licensed under the Apache License, Version 2.0 (the "License");
+ *         you may not use this file except in compliance with the License.
+ *         You may obtain a copy of the License at
+ *         <br/><br/>
+ *         http://www.apache.org/licenses/LICENSE-2.0
+ *         <br/><br/>
+ *         Unless required by applicable law or agreed to in writing, software
+ *         distributed under the License is distributed on an "AS IS" BASIS,
+ *         WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ *         See the License for the specific language governing permissions and
+ *         limitations under the License.
  */
 public class TestJsonReaderWriter extends TestCase
 {
-    public static boolean _debug = true;	// Change to 'false' to "hush" output
+    public static boolean _debug = true;    // Change to 'false' to "hush" output
     public static Date _testDate = new Date();
     public static Character _CONST_CHAR = new Character('j');
     public static Byte _CONST_BYTE = new Byte((byte) 16);
@@ -333,7 +334,9 @@ public class TestJsonReaderWriter extends TestCase
         private Object _arrayS;
         private Object _arrayArrayO;
 
-        public TestArray() { }
+        public TestArray()
+        {
+        }
 
         public void init()
         {
@@ -447,9 +450,9 @@ public class TestJsonReaderWriter extends TestCase
             _hetero_a = new Object[]{new Character('a'), Boolean.TRUE, new Byte((byte) 9), new Short((short) 9), new Integer(9), new Long(9), new Float(9.9), new Double(9.9), "getStartupInfo", _testDate, boolean.class, null, "null", _CONST_INT, Class.class};
             _testRefs0 = new Object[]{_testDate, Boolean.FALSE, _CONST_CHAR, _CONST_BYTE, _CONST_SHORT, _CONST_INT, _CONST_LONG, _CONST_FLOAT, _CONST_DOUBLE, "Happy"};
             _testRefs1 = new Object[]{_testDate, Boolean.FALSE, _CONST_CHAR, _CONST_BYTE, _CONST_SHORT, _CONST_INT, _CONST_LONG, _CONST_FLOAT, _CONST_DOUBLE, "Happy"};
-            _arrayO = new Object[] { "foo", true, null, 16L, 3.14};
-            _arrayS = new String[] {"fingers", "toes"};
-            _arrayArrayO = new Object[][] {{"true", "false"}, {1L, 2L, 3L}, null, {1.1, 2.2}, {true, false}};
+            _arrayO = new Object[]{"foo", true, null, 16L, 3.14};
+            _arrayS = new String[]{"fingers", "toes"};
+            _arrayArrayO = new Object[][]{{"true", "false"}, {1L, 2L, 3L}, null, {1.1, 2.2}, {true, false}};
         }
     }
 
@@ -808,8 +811,8 @@ public class TestJsonReaderWriter extends TestCase
         assertTrue("foo".equals(items[0]));
         assertTrue(Boolean.TRUE.equals(items[1]));
         assertNull(items[2]);
-        assertTrue(((Long)16L).equals(items[3]));
-        assertTrue(((Double)3.14).equals(items[4]));
+        assertTrue(((Long) 16L).equals(items[3]));
+        assertTrue(((Double) 3.14).equals(items[4]));
 
         assertTrue(root._arrayS instanceof String[]);
         String[] strItems = (String[]) root._arrayS;
@@ -865,7 +868,7 @@ public class TestJsonReaderWriter extends TestCase
             tree.add(new Integer(Integer.MAX_VALUE));
             tree.add(_CONST_INT);
 
-            _cols = new Collection[] {array, set, tree};
+            _cols = new Collection[]{array, set, tree};
 
             _strings_a = new LinkedList();
             _strings_a.add("Alpha");
@@ -1192,9 +1195,10 @@ public class TestJsonReaderWriter extends TestCase
         time(root);
     }
 
-	// Test direct fields for all types, primitives, special handled fields
+    // Test direct fields for all types, primitives, special handled fields
     // like Date, String, and Class, plus regular objects, and circular
     // references.
+
     private static class TestFields implements Serializable
     {
         private boolean _boolean_a;
@@ -1657,11 +1661,12 @@ public class TestJsonReaderWriter extends TestCase
         private long _userDate;
     }
 
-	// Instantiate off of each others JSON String, proving Date for long substitution works.  This will work on any
-	// field that is of type Date or Long.  It will not work when the Dates are inside a Collection, for example.
-	// <p/>
-	// This substitution trick allows Date fields to be converted to long in order to save memory 16 bytes of memory
-	// per date.  (Date's are more than 8 bytes, longs are 8).
+    // Instantiate off of each others JSON String, proving Date for long substitution works.  This will work on any
+    // field that is of type Date or Long.  It will not work when the Dates are inside a Collection, for example.
+    // <p/>
+    // This substitution trick allows Date fields to be converted to long in order to save memory 16 bytes of memory
+    // per date.  (Date's are more than 8 bytes, longs are 8).
+
     public void testDateLongSubstitution() throws Exception
     {
         println("\nTestJsonWriter.testDateLongSubstitution()");
@@ -1737,12 +1742,12 @@ public class TestJsonReaderWriter extends TestCase
     {
         println("\nTestJsonWriter.testRoots2()");
         // Test root JSON type as [ ]
-        Object array = new Object[] {"Hello"};
+        Object array = new Object[]{"Hello"};
         String json = getJsonString(array);
         JsonReader jr = new JsonReader(convertStringToInputStream(json));
         Object oa = jr.readObject();
         assertTrue(oa.getClass().isArray());
-        assertTrue(((Object[])oa)[0].equals("Hello"));
+        assertTrue(((Object[]) oa)[0].equals("Hello"));
 
         // Test root JSON type as { }
         Calendar cal = Calendar.getInstance();
@@ -1763,8 +1768,8 @@ public class TestJsonReaderWriter extends TestCase
         println("\nTestJsonWriter.testNoDefaultConstructor()");
         Calendar c = Calendar.getInstance();
         c.set(2010, 5, 5, 5, 5, 5);
-        String[] strings = new String[] { "C", "C++", "Java"};
-        int[] ints = new int[] {1, 2, 4, 8, 16, 32, 64, 128};
+        String[] strings = new String[]{"C", "C++", "Java"};
+        int[] ints = new int[]{1, 2, 4, 8, 16, 32, 64, 128};
         Object foo = new TestJsonNoDefaultOrPublicConstructor("Hello, World.", c.getTime(), (byte) 1, (short) 2, 3, 4L, 5.0f, 6.0, true, 'J', strings, ints);
         String jsonOut = getJsonString(foo);
         println(jsonOut);
@@ -1792,7 +1797,7 @@ public class TestJsonReaderWriter extends TestCase
         JsonReader jr = new JsonReader(convertStringToInputStream("[\"string\",17, null, true, false, [], -1273123,32131, 1e6, 3.14159, -9223372036854775808, 9223372036854775807]"));
         Object[] args = (Object[]) jr.readObject();
 
-        for (int i=0; i < args.length; i++)
+        for (int i = 0; i < args.length; i++)
         {
             println("args[" + i + "]=" + args[i]);
             if (args[i] != null)
@@ -1818,7 +1823,7 @@ public class TestJsonReaderWriter extends TestCase
     public void testUntypedCollections() throws Exception
     {
         println("\nTestJsonWriter.testUntypedCollections()");
-        Object[] poly = new Object[] {"Road Runner", 16L, 3.1415, true, false, null, 7, "Coyote", "Coyote"};
+        Object[] poly = new Object[]{"Road Runner", 16L, 3.1415, true, false, null, 7, "Coyote", "Coyote"};
         String json = getJsonString(poly);
         println("json=" + json);
         assertTrue("[\"Road Runner\",16,3.1415,true,false,null,{\"@type\":\"int\",\"value\":7},\"Coyote\",\"Coyote\"]".equals(json));
@@ -1850,13 +1855,13 @@ public class TestJsonReaderWriter extends TestCase
         private TestByte()
         {
             _arrayElement = new Byte((byte) -1);
-            _polyRefTarget = new Byte((byte)71);
+            _polyRefTarget = new Byte((byte) 71);
             _polyRef = _polyRefTarget;
             _polyNotRef = new Byte((byte) 71);
-            Byte local = new Byte((byte)75);
-            _null  = null;
-            _typeArray = new Byte[] {_arrayElement, (byte) 44, local, _null, null, new Byte((byte)44)};
-            _objArray = new Object[] {_arrayElement, (byte) 69, local, _null, null, new Byte((byte)69)};
+            Byte local = new Byte((byte) 75);
+            _null = null;
+            _typeArray = new Byte[]{_arrayElement, (byte) 44, local, _null, null, new Byte((byte) 44)};
+            _objArray = new Object[]{_arrayElement, (byte) 69, local, _null, null, new Byte((byte) 69)};
             _min = Byte.MIN_VALUE;
             _max = Byte.MAX_VALUE;
         }
@@ -1920,13 +1925,13 @@ public class TestJsonReaderWriter extends TestCase
         private TestShort()
         {
             _arrayElement = new Short((short) -1);
-            _polyRefTarget = new Short((short)710);
+            _polyRefTarget = new Short((short) 710);
             _polyRef = _polyRefTarget;
             _polyNotRef = new Short((short) 710);
-            Short local = new Short((short)75);
-            _null  = null;
-            _typeArray = new Short[] {_arrayElement, (short) 44, local, _null, null, new Short((short)44)};
-            _objArray = new Object[] {_arrayElement, (short) 69, local, _null, null, new Short((short)69)};
+            Short local = new Short((short) 75);
+            _null = null;
+            _typeArray = new Short[]{_arrayElement, (short) 44, local, _null, null, new Short((short) 44)};
+            _objArray = new Object[]{_arrayElement, (short) 69, local, _null, null, new Short((short) 69)};
             _min = Short.MIN_VALUE;
             _max = Short.MAX_VALUE;
         }
@@ -1999,9 +2004,9 @@ public class TestJsonReaderWriter extends TestCase
             _polyRef = _polyRefTarget;
             _polyNotRef = new Integer(710);
             Integer local = new Integer(75);
-            _null  = null;
-            _typeArray = new Integer[] {_arrayElement, 44, local, _null, null, new Integer(44), 0, new Integer(0)};
-            _objArray = new Object[] {_arrayElement, 69, local, _null, null, new Integer(69), 0, new Integer(0)};
+            _null = null;
+            _typeArray = new Integer[]{_arrayElement, 44, local, _null, null, new Integer(44), 0, new Integer(0)};
+            _objArray = new Object[]{_arrayElement, 69, local, _null, null, new Integer(69), 0, new Integer(0)};
             _min = Integer.MIN_VALUE;
             _max = Integer.MAX_VALUE;
         }
@@ -2077,8 +2082,8 @@ public class TestJsonReaderWriter extends TestCase
             Long local = new Long(75);
             _null = null;
             // 44 below is between -128 and 127, values cached by     Long Long.valueOf(long l)
-            _typeArray = new Long[] {_arrayElement, 44L, local, _null, null, new Long(44)};
-            _objArray = new Object[] {_arrayElement, 69L, local, _null, null, new Long(69)};
+            _typeArray = new Long[]{_arrayElement, 44L, local, _null, null, new Long(44)};
+            _objArray = new Object[]{_arrayElement, 69L, local, _null, null, new Long(69)};
             _min = Long.MIN_VALUE;
             _max = Long.MAX_VALUE;
         }
@@ -2149,8 +2154,8 @@ public class TestJsonReaderWriter extends TestCase
             _polyNotRef = new Double(71);
             Double local = new Double(75);
             _null = null;
-            _typeArray = new Double[] {_arrayElement, 44.0, local, _null, null, new Double(44)};
-            _objArray = new Object[] {_arrayElement, 69.0, local, _null, null, new Double(69)};
+            _typeArray = new Double[]{_arrayElement, 44.0, local, _null, null, new Double(44)};
+            _objArray = new Object[]{_arrayElement, 69.0, local, _null, null, new Double(69)};
             _min = Double.MIN_VALUE;
             _max = Double.MAX_VALUE;
         }
@@ -2215,8 +2220,8 @@ public class TestJsonReaderWriter extends TestCase
             _polyNotRef = new Float(71);
             Float local = new Float(75);
             _null = null;
-            _typeArray = new Float[] {_arrayElement, 44f, local, _null, null, new Float(44f)};
-            _objArray = new Object[] {_arrayElement, 69f, local, _null, null, new Float(69f)};
+            _typeArray = new Float[]{_arrayElement, 44f, local, _null, null, new Float(44f)};
+            _objArray = new Object[]{_arrayElement, 69f, local, _null, null, new Float(69f)};
             _min = Float.MIN_VALUE;
             _max = Float.MAX_VALUE;
         }
@@ -2285,8 +2290,8 @@ public class TestJsonReaderWriter extends TestCase
             _polyNotRef = new Boolean(true);
             Boolean local = new Boolean(true);
             _null = null;
-            _typeArray = new Boolean[] {_arrayElement, true, local, _null, null, Boolean.FALSE, new Boolean(false)};
-            _objArray = new Object[] {_arrayElement, true, local, _null, null, Boolean.FALSE, new Boolean(false) };
+            _typeArray = new Boolean[]{_arrayElement, true, local, _null, null, Boolean.FALSE, new Boolean(false)};
+            _objArray = new Object[]{_arrayElement, true, local, _null, null, Boolean.FALSE, new Boolean(false)};
         }
     }
 
@@ -2347,13 +2352,13 @@ public class TestJsonReaderWriter extends TestCase
         private TestCharacter()
         {
             _arrayElement = new Character((char) 1);
-            _polyRefTarget = new Character((char)71);
+            _polyRefTarget = new Character((char) 71);
             _polyRef = _polyRefTarget;
             _polyNotRef = new Character((char) 71);
-            Character local = new Character((char)75);
-            _null  = null;
-            _typeArray = new Character[] {_arrayElement, 'a', local, _null, null};
-            _objArray = new Object[] {_arrayElement, 'b', local, _null, null};
+            Character local = new Character((char) 75);
+            _null = null;
+            _typeArray = new Character[]{_arrayElement, 'a', local, _null, null};
+            _objArray = new Object[]{_arrayElement, 'b', local, _null, null};
             _min = Character.MIN_VALUE;
             _max = Character.MAX_VALUE;
         }
@@ -2373,7 +2378,7 @@ public class TestJsonReaderWriter extends TestCase
         assertTrue(that._polyRef.equals((char) 71));
         assertTrue(that._polyNotRef.equals((char) 71));
         assertTrue(addressEquals(that._polyRef, that._polyRefTarget));
-        assertTrue (addressEquals(that._polyNotRef, that._polyRef));    // Character cache working
+        assertTrue(addressEquals(that._polyNotRef, that._polyRef));    // Character cache working
 
         assertTrue(that._typeArray.length == 5);
         assertTrue(addressEquals(that._typeArray[0], that._arrayElement));
@@ -2437,10 +2442,10 @@ public class TestJsonReaderWriter extends TestCase
                 System.out.println("Get a new JVM that supports UTF-8");
             }
 
-            _strArray = new String[] {"1st", "2nd", _null, null, new String("3rd")};
-            _objArray = new Object[] {"1st", "2nd", _null, null, new String("3rd")};
-            _objStrArray = new String[] {"1st", "2nd", _null, null, new String("3rd")};
-            _cache = new Object[] {"true", "true", "golf", "golf"};
+            _strArray = new String[]{"1st", "2nd", _null, null, new String("3rd")};
+            _objArray = new Object[]{"1st", "2nd", _null, null, new String("3rd")};
+            _objStrArray = new String[]{"1st", "2nd", _null, null, new String("3rd")};
+            _cache = new Object[]{"true", "true", "golf", "golf"};
             _poly = "Poly";
         }
     }
@@ -2502,9 +2507,9 @@ public class TestJsonReaderWriter extends TestCase
             _polyRef = _polyRefTarget;
             _polyNotRef = new Date(71);
             Date local = new Date(75);
-            _null  = null;
-            _typeArray = new Date[] {_arrayElement, new Date(69), local, _null, null, new Date(69)};
-            _objArray = new Object[] {_arrayElement, new Date(69), local, _null, null, new Date(69)};
+            _null = null;
+            _typeArray = new Date[]{_arrayElement, new Date(69), local, _null, null, new Date(69)};
+            _objArray = new Object[]{_arrayElement, new Date(69), local, _null, null, new Date(69)};
             _min = new Date(Long.MIN_VALUE);
             _max = new Date(Long.MAX_VALUE);
         }
@@ -2586,19 +2591,19 @@ public class TestJsonReaderWriter extends TestCase
             _BooleanClass = Boolean.class;
             _booleanClassO = boolean.class;
             _BooleanClassO = Boolean.class;
-            _booleanClassArray = new Class[] { boolean.class };
-            _BooleanClassArray = new Class[] { Boolean.class };
-            _booleanClassArrayO = new Object[] { boolean.class };
-            _BooleanClassArrayO = new Object[] { Boolean.class };
+            _booleanClassArray = new Class[]{boolean.class};
+            _BooleanClassArray = new Class[]{Boolean.class};
+            _booleanClassArrayO = new Object[]{boolean.class};
+            _BooleanClassArrayO = new Object[]{Boolean.class};
 
             _charClass = char.class;
             _CharacterClass = Character.class;
             _charClassO = char.class;
             _CharacterClassO = Character.class;
-            _charClassArray = new Class[] { char.class };
-            _CharacterClassArray = new Class[] { Character.class };
-            _charClassArrayO = new Object[] { char.class };
-            _CharacterClassArrayO = new Object[] { Character.class };
+            _charClassArray = new Class[]{char.class};
+            _CharacterClassArray = new Class[]{Character.class};
+            _charClassArrayO = new Object[]{char.class};
+            _CharacterClassArrayO = new Object[]{Character.class};
         }
     }
 
@@ -2738,7 +2743,9 @@ public class TestJsonReaderWriter extends TestCase
         private Class _klass;
         private char _letter;
 
-        public TestCustom() {}
+        public TestCustom()
+        {
+        }
 
         private void init()
         {
@@ -2777,15 +2784,18 @@ public class TestJsonReaderWriter extends TestCase
             _christBday = new Date((Long) obj.get("christmas"));
             _cost = (Double) obj.get("dollars");
             _x = ((Double) obj.get("x")).floatValue();
-            try {
-                _klass = Class.forName((String)obj.get("class"));
-            } catch (ClassNotFoundException e) {
+            try
+            {
+                _klass = Class.forName((String) obj.get("class"));
+            }
+            catch (ClassNotFoundException e)
+            {
                 e.printStackTrace();  //To change body of catch statement use File | Settings | File Templates.
             }
             _letter = ((String) obj.get("letter")).charAt(0);
         }
     }
-    
+
     public void testCustom() throws Exception
     {
         println("\nTestJsonWriter.testCustom()");
@@ -2800,43 +2810,44 @@ public class TestJsonReaderWriter extends TestCase
         assertTrue("ball".equals(custom1._nerf));
         assertTrue("green".equals(custom1._slime));
         assertTrue(42 == custom1._age);
-        assertTrue(custom1._truth);        
+        assertTrue(custom1._truth);
     }
-    
-    public class A 
-    { 
-	  public String a; 
-	  class B 
-	  { 
 
-	    public String b; 
+    public class A
+    {
+        public String a;
 
-	    public B() 
-	    {
-	      // No args constructor for B
-	    }
-	  } 
-   	}
-    
+        class B
+        {
+
+            public String b;
+
+            public B()
+            {
+                // No args constructor for B
+            }
+        }
+    }
+
     public void testInner() throws Exception
     {
-    	A a = new A();
-    	a.a = "aaa";
-    	
+        A a = new A();
+        a.a = "aaa";
+
         String json = getJsonString(a);
         JsonReader jr = new JsonReader(convertStringToInputStream(json));
         A o1 = (A) readJsonObject(jr);
         assertTrue(o1.a.equals("aaa"));
-        
-    	TestJsonReaderWriter.A.B b = a.new B();
-    	b.b = "bbb";
+
+        TestJsonReaderWriter.A.B b = a.new B();
+        b.b = "bbb";
         json = getJsonString(b);
         jr = new JsonReader(convertStringToInputStream(json));
         TestJsonReaderWriter.A.B o2 = (TestJsonReaderWriter.A.B) readJsonObject(jr);
         assertTrue(o2.b.equals("bbb"));
     }
 
-    private static void println(Object ... args)
+    private static void println(Object... args)
     {
         if (_debug)
         {
@@ -2898,4 +2909,3 @@ public class TestJsonReaderWriter extends TestCase
         return ret;
     }
 }
-
