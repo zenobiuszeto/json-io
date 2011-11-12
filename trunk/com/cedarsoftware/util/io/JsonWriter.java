@@ -12,7 +12,6 @@ import java.lang.reflect.Field;
 import java.lang.reflect.Method;
 import java.lang.reflect.Modifier;
 import java.util.Date;
-import java.util.Deque;
 import java.util.HashMap;
 import java.util.IdentityHashMap;
 import java.util.LinkedHashMap;
@@ -113,7 +112,7 @@ public class JsonWriter extends Writer
 
     private void traceReferences(Object root)
     {
-        Deque<Object> stack = new LinkedList<Object>();
+        LinkedList<Object> stack = new LinkedList<Object>();
         stack.addFirst(root);
 
         while (!stack.isEmpty())
@@ -163,7 +162,7 @@ public class JsonWriter extends Writer
         }
     }
 
-    private void traceFields(Deque<Object> stack, Object obj)
+    private void traceFields(LinkedList<Object> stack, Object obj)
     {
         ClassMeta fields = getDeepDeclaredFields(obj.getClass(), _classMeta);
 
@@ -765,8 +764,7 @@ public class JsonWriter extends Writer
                             field.setAccessible(true);
                         }
                         catch (Exception ignored)
-                        {
-                        }
+                        { }
                     }
 
                     if ((field.getModifiers() & Modifier.STATIC) == 0)
