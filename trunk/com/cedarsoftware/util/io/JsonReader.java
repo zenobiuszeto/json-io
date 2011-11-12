@@ -15,7 +15,6 @@ import java.lang.reflect.InvocationTargetException;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Date;
-import java.util.Deque;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.IdentityHashMap;
@@ -237,7 +236,7 @@ public class JsonReader extends Reader
      */
     private Object convertMapsToObjects(JsonObject<String, Object> root) throws IOException
     {
-        Deque<JsonObject<String, Object>> stack = new LinkedList<JsonObject<String, Object>>();
+        LinkedList<JsonObject<String, Object>> stack = new LinkedList<JsonObject<String, Object>>();
         stack.push(root);
 
         while (!stack.isEmpty())
@@ -266,11 +265,11 @@ public class JsonReader extends Reader
      * assign the list of items in the JsonObject (stored in the @items field)
      * to each array element.  All array elements are processed excluding elements
      * that reference an unresolved object.  These are filled in later.
-     * @param stack a Stack (Deque) used to support graph traversal.
+     * @param stack a Stack (LinkedList) used to support graph traversal.
      * @param jsonObj a Map-of-Map representation of the JSON input stream.
      * @throws IOException for stream errors or parsing errors.
      */
-    private void traverseArray(Deque<JsonObject<String, Object>> stack, JsonObject<String, Object> jsonObj) throws IOException
+    private void traverseArray(LinkedList<JsonObject<String, Object>> stack, JsonObject<String, Object> jsonObj) throws IOException
     {
         Object array = jsonObj.target;
         int len = Array.getLength(array);
@@ -339,7 +338,7 @@ public class JsonReader extends Reader
             }
             else if (element instanceof JsonObject)
             {
-                JsonObject<String, Object> jsonObject = (JsonObject) element;
+                JsonObject<String, Object> jsonObject = (JsonObject<String, Object>) element;
                 Number ref = (Number) jsonObject.get("@ref");
 
                 if (ref != null)
@@ -379,7 +378,7 @@ public class JsonReader extends Reader
         }
     }
 
-    private void traverseFields(Deque<JsonObject<String, Object>> stack, JsonObject<String, Object> jsonObj) throws IOException
+    private void traverseFields(LinkedList<JsonObject<String, Object>> stack, JsonObject<String, Object> jsonObj) throws IOException
     {
         Object javaMate = jsonObj.target;
 
@@ -428,14 +427,14 @@ public class JsonReader extends Reader
 
     /**
      * Map Json Map object field to Java object field.
-     * @param stack Stack (Deque) used for graph traversal.
+     * @param stack Stack (LinkedList) used for graph traversal.
      * @param jsonObj a Map-of-Map representation of the current object being examined (containing all fields).
      * @param field a Java Field object representing where the jsonObj should be converted and stored.
      * @param rhs the JSON value that will be converted and stored in the 'field' on the associated
      * Java target object. 
      * @throws IOException for stream errors or parsing errors.
      */
-    private void assignField(Deque<JsonObject<String, Object>> stack, JsonObject jsonObj, Field field, Object rhs) throws IOException
+    private void assignField(LinkedList<JsonObject<String, Object>> stack, JsonObject jsonObj, Field field, Object rhs) throws IOException
     {
         Object target = jsonObj.target;
         try
@@ -483,7 +482,7 @@ public class JsonReader extends Reader
             }
             else if (rhs instanceof JsonObject)
             {
-                JsonObject<String, Object> jObj = (JsonObject) rhs;
+                JsonObject<String, Object> jObj = (JsonObject<String, Object>) rhs;
                 Number ref = (Number) jObj.get("@ref");
 
                 if (ref != null)
@@ -507,7 +506,7 @@ public class JsonReader extends Reader
                     field.set(target, createJavaObjectInstance(fieldType, jObj));
                     if (!isPrimitive(jObj.target.getClass()))
                     {
-                        stack.addFirst((JsonObject) rhs);
+                        stack.addFirst((JsonObject<String, Object>) rhs);
                     }
                 }
             }
@@ -778,7 +777,7 @@ public class JsonReader extends Reader
      */
     private Object readArray() throws IOException
     {
-        Deque<JsonArray> stack = new LinkedList<JsonArray>();
+        LinkedList<JsonArray> stack = new LinkedList<JsonArray>();
         JsonArray root = new JsonArray();
         stack.addFirst(root);
 
@@ -832,21 +831,17 @@ public class JsonReader extends Reader
      */
     private String readToken(String token) throws IOException
     {
-        int len = token.length();
+		int len = token.length();
 
-        for (int i = 0; i < len; i++)
-        {
-            int c = _in.read();
-            c = Character.toLowerCase((char) c);
-            int loTokenChar = token.charAt(i);
+		for (int i=0; i < len; i++)
+		{
+            if (token.charAt(i) != (char) _in.read())
+			{
+				throw new IOException("Expected token '" + token + "' at position " + _in.getPos());
+			}
+		}
 
-            if (loTokenChar != c)
-            {
-                throw new IOException("Expected token '" + token + "' at position " + _in.getPos());
-            }
-        }
-
-        return token;
+		return token;
     }
 
     /**
@@ -870,8 +865,8 @@ public class JsonReader extends Reader
         {
             throw new IOException("Invalid JSON number character at position " + _in.getPos());
         }
-
         boolean isFloat = false;
+
         try
         {
             while (true)
@@ -898,13 +893,12 @@ public class JsonReader extends Reader
             throw new IOException("Too many digits in number at position " + _in.getPos());
         }
 
-        String num = new String(_numBuf, 0, len);
-        Number number;
         if (isFloat)
         {   // Floating point number needed
+            String num = new String(_numBuf, 0, len);
             try
             {
-                number = Double.valueOf(num);
+                return Double.parseDouble(num);
             }
             catch (NumberFormatException e)
             {
@@ -913,16 +907,14 @@ public class JsonReader extends Reader
         }
         else
         {
-            try
+            boolean isNeg = _numBuf[0] == '-';
+            long n = 0;
+            for (int i=(isNeg ? 1 : 0); i < len; i++)
             {
-                number = Long.valueOf(num, 10);
+                n = (_numBuf[i] - '0') + n * 10;
             }
-            catch (NumberFormatException e)
-            {
-                throw new IOException("Invalid integer number at position " + _in.getPos() + ", number: " + num);
-            }
+            return isNeg ? -n : n;
         }
-        return number;
     }
 
     /**
@@ -1031,7 +1023,7 @@ public class JsonReader extends Reader
                     }
                     else
                     {
-                        throw new IOException("Expected hexidecimal digits at position " + _in.getPos());
+                        throw new IOException("Expected hexadecimal digits at position " + _in.getPos());
                     }
                     break;
 
@@ -1041,13 +1033,9 @@ public class JsonReader extends Reader
             }
         }
 
-        String s = _strBuf.toString();
-        String cacheHit = _stringCache.get(s);
-        if (cacheHit == null)
-        {
-            return s;
-        }
-        return cacheHit;
+		String s = _strBuf.toString();
+		String cacheHit = _stringCache.get(s);
+        return cacheHit == null ? s : cacheHit;
     }
 
     private Object newInstance(Class c) throws IOException
