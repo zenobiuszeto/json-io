@@ -11,9 +11,14 @@ import java.lang.reflect.Array;
 import java.lang.reflect.Field;
 import java.lang.reflect.Method;
 import java.lang.reflect.Modifier;
+import java.text.DateFormat;
+import java.text.SimpleDateFormat;
+import java.util.Calendar;
+import java.util.Collection;
 import java.util.Date;
 import java.util.HashMap;
 import java.util.IdentityHashMap;
+import java.util.Iterator;
 import java.util.LinkedHashMap;
 import java.util.LinkedList;
 import java.util.Map;
@@ -50,7 +55,7 @@ import java.util.Map;
  *
  * @author John DeRegnaucourt (jdereg@gmail.com)
  *         <br/>
- *         Copyright [2010] John DeRegnaucourt
+ *         Copyright (c) John DeRegnaucourt
  *         <br/><br/>
  *         Licensed under the Apache License, Version 2.0 (the "License");
  *         you may not use this file except in compliance with the License.
@@ -68,17 +73,19 @@ public class JsonWriter extends Writer
 {
     private final Map<Object, Long> _objVisited = new IdentityHashMap<Object, Long>();
     private final Map<Object, Long> _objsReferenced = new IdentityHashMap<Object, Long>();
-    private final Map<String, ClassMeta> _classMeta = new HashMap<String, ClassMeta>();
+    private static final Map<String, ClassMeta> _classMetaCache = new HashMap<String, ClassMeta>();
     private static Object[] _byteStrings = new Object[256];
     private Writer _out;
     private long _identity = 1;
+    private boolean _prettyMode = true;
+    private DateFormat _dateFormat = new SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss.SSSZ (z)");
 
     static
     {
         for (short i = -128; i <= 127; i++)
         {
             char[] chars = Integer.toString(i).toCharArray();
-            _byteStrings[i + 128] = chars; 
+            _byteStrings[i + 128] = chars;
         }
     }
 
@@ -88,10 +95,79 @@ public class JsonWriter extends Writer
         Method _readMethod = null;
     }
 
-    public JsonWriter(OutputStream out) throws IOException
+    /**
+     * Convert a Java Object to a JSON String.  This is the
+     * easy-to-use API - it returns null if there was an error.
+     *
+     * @param item Object to convert to a JSON String.
+     * @return String containing JSON representation of passed
+     *         in object, or null if an error occurred.
+     */
+    public static String toJson(Object item)
+    {
+        return toJson(item, true);
+    }
+
+    /**
+     * Convert a Java Object to a JSON String.
+     *
+     * @param item Object to convert to a JSON String.
+     * @return String containing JSON representation of passed
+     *         in object.
+     * @throws java.io.IOException If an I/O error occurs
+     */
+    public static String objectToJson(Object item) throws IOException
+    {
+        return objectToJson(item, true);
+    }
+
+    /**
+     * Convert a Java Object to a JSON String.  This is the
+     * easy-to-use API - it returns null if there was an error.
+     *
+     * @param item Object to convert to a JSON String.
+     * @return String containing JSON representation of passed
+     *         in object, or null if an error occurred.
+     */
+    public static String toJson(Object item, boolean prettyMode)
     {
         try
         {
+            return objectToJson(item);
+        }
+        catch (IOException ignored)
+        {
+            return null;
+        }
+    }
+
+    /**
+     * Convert a Java Object to a JSON String.
+     *
+     * @param item Object to convert to a JSON String.
+     * @return String containing JSON representation of passed
+     *         in object.
+     * @throws java.io.IOException If an I/O error occurs
+     */
+    public static String objectToJson(Object item, boolean prettyMode) throws IOException
+    {
+        ByteArrayOutputStream stream = new ByteArrayOutputStream();
+        JsonWriter writer = new JsonWriter(stream, prettyMode);
+        writer.write(item);
+        writer.close();
+        return new String(stream.toByteArray(), "UTF-8");
+    }
+
+    public JsonWriter(OutputStream out) throws IOException
+    {
+        this(out, true);
+    }
+
+    public JsonWriter(OutputStream out, boolean prettyMode) throws IOException
+    {
+        try
+        {
+            _prettyMode = prettyMode;
             _out = new BufferedWriter(new OutputStreamWriter(out, "UTF-8"));
         }
         catch (UnsupportedEncodingException e)
@@ -164,7 +240,7 @@ public class JsonWriter extends Writer
 
     private void traceFields(LinkedList<Object> stack, Object obj)
     {
-        ClassMeta fields = getDeepDeclaredFields(obj.getClass(), _classMeta);
+        ClassMeta fields = getDeepDeclaredFields(obj.getClass());
 
         for (Field field : fields.values())
         {
@@ -181,10 +257,30 @@ public class JsonWriter extends Writer
                     stack.addFirst(o);
                 }
             }
-            catch (IllegalAccessException ignored)
-            {
-            }
+            catch (IllegalAccessException ignored) { }
         }
+    }
+
+    private boolean writeOptionalReference(Object obj) throws IOException
+    {
+        if (_objVisited.containsKey(obj))
+        {    // Only write (define) an object once in the JSON stream, otherwise emit a @ref
+            _out.write("{\"@ref\":");
+            Object id = getId(obj);
+            if (id == null)
+            {   // TODO: remove this if once it is determine how this can happen.  Currently suspect
+                // Weak / Soft references causing this (graph changes between trace and write).
+                _out.write("0}");
+                return true;
+            }
+            _out.write(getId(obj));
+            _out.write('}');
+            return true;
+        }
+
+        // Mark the object as visited by putting it in the Map (this map is re-used / clear()'d after walk()).
+        _objVisited.put(obj, null);
+        return false;
     }
 
     private void writeImpl(Object obj, boolean showType) throws IOException
@@ -192,31 +288,35 @@ public class JsonWriter extends Writer
         if (obj == null)
         {
             _out.write("{}");
+            return;
         }
-        else if (obj.getClass().isArray())
+
+        if (obj.getClass().isArray())
         {
             writeArray(obj, showType);
         }
         else
         {
-            writeObject(obj, showType);
+            if (_prettyMode)
+            {   // Special Handling for Collection's and Maps to make output smaller, easier to read.
+                if (obj instanceof Collection)
+                {
+                    writeCollection((Collection) obj, showType);
+                }
+                else if (obj instanceof Map)
+                {
+                    writeMap((Map) obj, showType);
+                }
+                else
+                {
+                    writeObject(obj, showType);
+                }
+            }
+            else
+            {
+                writeObject(obj, showType);
+            }
         }
-    }
-
-    private boolean writeOptionalReference(Object obj) throws IOException
-    {
-        if (_objVisited.containsKey(obj))
-        {   // Only write (define) an object once in the JSON stream, otherwise emit a @ref
-
-            _out.write("{\"@ref\":");
-            _out.write(getId(obj));
-            _out.write('}');
-            return true;
-        }
-
-        // Mark the object as visited by putting it in the Map (this map is re-used / clear()'d after traceReferences()).
-        _objVisited.put(obj, null);
-        return false;
     }
 
     private void writeId(String id) throws IOException
@@ -288,14 +388,35 @@ public class JsonWriter extends Writer
         {
             _out.write('{');
             writeType(obj);
-            _out.write(',');
-            _out.write("\"value\":");
+            _out.write(",\"value\":");
             writeJsonUtf8String(value);
             _out.write('}');
         }
         else
         {
             writeJsonUtf8String(value);
+        }
+    }
+
+    private void writeCalendar(Object obj, boolean showType) throws IOException
+    {
+        Calendar cal = (Calendar) obj;
+        _dateFormat.setTimeZone(cal.getTimeZone());
+        String date = _dateFormat.format(cal.getTime());
+
+        if (showType)
+        {
+            _out.write('{');
+            writeType(obj);
+            _out.write(",\"value\":\"");
+            _out.write(date);
+            _out.write("\"}");
+        }
+        else
+        {
+            _out.write('"');
+            _out.write(date);
+            _out.write('"');
         }
     }
 
@@ -307,8 +428,7 @@ public class JsonWriter extends Writer
         {
             _out.write('{');
             writeType(obj);
-            _out.write(',');
-            _out.write("\"value\":");
+            _out.write(",\"value\":");
             _out.write(value);
             _out.write('}');
         }
@@ -324,9 +444,9 @@ public class JsonWriter extends Writer
 
         if (obj instanceof Character)
         {
-            _out.write('\"');
+            _out.write('"');
             _out.write((Character) obj);
-            _out.write('\"');
+            _out.write('"');
         }
         else
         {
@@ -392,13 +512,7 @@ public class JsonWriter extends Writer
         // reflective Array.get() but it is slower.  I chose speed over code length.
         if (byte[].class.equals(arrayType))
         {
-            byte[] bytes = (byte[]) array;
-            for (int i = 0; i < lenMinus1; i++)
-            {
-                _out.write((char[])_byteStrings[bytes[i] + 128]);
-                _out.write(',');
-            }
-            _out.write((char[])_byteStrings[bytes[lenMinus1] + 128]);
+            writeByteArray((byte[]) array, lenMinus1);
         }
         else if (char[].class.equals(arrayType))
         {
@@ -406,62 +520,27 @@ public class JsonWriter extends Writer
         }
         else if (short[].class.equals(arrayType))
         {
-            short[] shorts = (short[]) array;
-            for (int i = 0; i < lenMinus1; i++)
-            {
-                _out.write(Integer.toString(shorts[i]));
-                _out.write(',');
-            }
-            _out.write(Integer.toString(shorts[lenMinus1]));
+            writeShortArray((short[]) array, lenMinus1);
         }
         else if (int[].class.equals(arrayType))
         {
-            int[] ints = (int[]) array;
-            for (int i = 0; i < lenMinus1; i++)
-            {
-                _out.write(Integer.toString(ints[i]));
-                _out.write(',');
-            }
-            _out.write(Integer.toString(ints[lenMinus1]));
+            writeIntArray((int[]) array, lenMinus1);
         }
         else if (long[].class.equals(arrayType))
         {
-            long[] longs = (long[]) array;
-            for (int i = 0; i < lenMinus1; i++)
-            {
-                _out.write(Long.toString(longs[i]));
-                _out.write(',');
-            }
-            _out.write(Long.toString(longs[lenMinus1]));
+            writeLongArray((long[]) array, lenMinus1);
         }
         else if (float[].class.equals(arrayType))
         {
-            float[] floats = (float[]) array;
-            for (int i = 0; i < lenMinus1; i++)
-            {
-                _out.write(Double.toString(floats[i]));
-                _out.write(',');
-            }
-            _out.write(Float.toString(floats[lenMinus1]));
+            writeFloatArray((float[]) array, lenMinus1);
         }
         else if (double[].class.equals(arrayType))
         {
-            double[] dubs = (double[]) array;
-            for (int i = 0; i < lenMinus1; i++)
-            {
-                _out.write(Double.toString(dubs[i]));
-                _out.write(',');
-            }
-            _out.write(Double.toString(dubs[lenMinus1]));
+            writeDoubleArray((double[]) array, lenMinus1);
         }
         else if (boolean[].class.equals(arrayType))
         {
-            boolean[] bools = (boolean[]) array;
-            for (int i = 0; i < lenMinus1; i++)
-            {
-                _out.write(bools[i] ? "true," : "false,");
-            }
-            _out.write(Boolean.toString(bools[lenMinus1]));
+            writeBooleanArray((boolean[]) array, lenMinus1);
         }
         else
         {
@@ -506,6 +585,10 @@ public class JsonWriter extends Writer
                     {
                         writeDate(value, true);
                     }
+                    else if (value instanceof Calendar)
+                    {
+                        writeCalendar(value, true);
+                    }
                     else if (value instanceof Class)
                     {
                         writeClass(value, true);
@@ -540,6 +623,222 @@ public class JsonWriter extends Writer
         }
     }
 
+    private void writeBooleanArray(boolean[] booleans, int lenMinus1) throws IOException
+    {
+        for (int i = 0; i < lenMinus1; i++)
+        {
+            _out.write(booleans[i] ? "true," : "false,");
+        }
+        _out.write(Boolean.toString(booleans[lenMinus1]));
+    }
+
+    private void writeDoubleArray(double[] doubles, int lenMinus1) throws IOException
+    {
+        for (int i = 0; i < lenMinus1; i++)
+        {
+            _out.write(Double.toString(doubles[i]));
+            _out.write(',');
+        }
+        _out.write(Double.toString(doubles[lenMinus1]));
+    }
+
+    private void writeFloatArray(float[] floats, int lenMinus1) throws IOException
+    {
+        for (int i = 0; i < lenMinus1; i++)
+        {
+            _out.write(Double.toString(floats[i]));
+            _out.write(',');
+        }
+        _out.write(Float.toString(floats[lenMinus1]));
+    }
+
+    private void writeLongArray(long[] longs, int lenMinus1) throws IOException
+    {
+        for (int i = 0; i < lenMinus1; i++)
+        {
+            _out.write(Long.toString(longs[i]));
+            _out.write(',');
+        }
+        _out.write(Long.toString(longs[lenMinus1]));
+    }
+
+    private void writeIntArray(int[] ints, int lenMinus1) throws IOException
+    {
+        for (int i = 0; i < lenMinus1; i++)
+        {
+            _out.write(Integer.toString(ints[i]));
+            _out.write(',');
+        }
+        _out.write(Integer.toString(ints[lenMinus1]));
+    }
+
+    private void writeShortArray(short[] shorts, int lenMinus1) throws IOException
+    {
+        for (int i = 0; i < lenMinus1; i++)
+        {
+            _out.write(Integer.toString(shorts[i]));
+            _out.write(',');
+        }
+        _out.write(Integer.toString(shorts[lenMinus1]));
+    }
+
+    private void writeByteArray(byte[] bytes, int lenMinus1) throws IOException
+    {
+        for (int i = 0; i < lenMinus1; i++)
+        {
+            _out.write((char[]) _byteStrings[bytes[i] + 128]);
+            _out.write(',');
+        }
+        _out.write((char[]) _byteStrings[bytes[lenMinus1] + 128]);
+    }
+
+    private void writeCollection(Collection col, boolean showType) throws IOException
+    {
+        if (writeOptionalReference(col))
+        {
+            return;
+        }
+
+        boolean referenced = _objsReferenced.containsKey(col);
+
+        _out.write("{");
+        if (showType || referenced)
+        {
+            if (referenced)
+            {
+                writeId(getId(col));
+            }
+
+            if (showType)
+            {
+                if (referenced)
+                {
+                    _out.write(",");
+                }
+                writeType(col);
+            }
+        }
+
+        int len = col.size();
+
+        if (len == 0)
+        {
+            _out.write("}");
+            return;
+        }
+
+        if (showType || referenced)
+        {
+            _out.write(",");
+        }
+
+        _out.write("\"@items\":[");
+        Iterator i = col.iterator();
+
+        while (i.hasNext())
+        {
+            writeCollectionElement(i.next());
+
+            if (i.hasNext())
+            {
+                _out.write(",");
+            }
+
+        }
+        _out.write("]}");
+    }
+
+    private void writeMap(Map map, boolean showType) throws IOException
+    {
+        if (writeOptionalReference(map))
+        {
+            return;
+        }
+
+        boolean referenced = _objsReferenced.containsKey(map);
+
+        _out.write("{");
+        if (showType || referenced)
+        {
+            if (referenced)
+            {
+                writeId(getId(map));
+            }
+
+            if (showType)
+            {
+                if (referenced)
+                {
+                    _out.write(",");
+                }
+                writeType(map);
+            }
+        }
+
+        if (map.isEmpty())
+        {
+            _out.write("}");
+            return;
+        }
+
+        if (showType || referenced)
+        {
+            _out.write(",");
+        }
+
+        _out.write("\"@keys\":[");
+        Iterator i = map.keySet().iterator();
+
+        while (i.hasNext())
+        {
+            writeCollectionElement(i.next());
+
+            if (i.hasNext())
+            {
+                _out.write(",");
+            }
+        }
+
+        _out.write("],\"@items\":[");
+        i = map.values().iterator();
+
+        while (i.hasNext())
+        {
+            writeCollectionElement(i.next());
+
+            if (i.hasNext())
+            {
+                _out.write(",");
+            }
+        }
+
+        _out.write("]}");
+    }
+
+    /**
+     * Write an element that is contained in some type of collection or Map.
+     * @param o Collection element to output in JSON format.
+     */
+    private void writeCollectionElement(Object o) throws IOException
+    {
+        if (o == null)
+        {
+            _out.write("null");
+        }
+        else if (o instanceof Boolean || o instanceof Long || o instanceof Double)
+        {
+            _out.write(o.toString());
+        }
+        else if (o instanceof String)
+        {
+            writeJsonUtf8String(o.toString());
+        }
+        else
+        {
+            writeImpl(o, true);
+        }
+    }
+
     /**
      * String, Date, and Class have been written before calling this method,
      * strictly for performance.
@@ -552,6 +851,27 @@ public class JsonWriter extends Writer
      */
     private void writeObject(Object obj, boolean showType) throws IOException
     {
+        if (obj instanceof String)
+        {
+            writeJsonUtf8String((String) obj);
+            return;
+        }
+        else if (obj instanceof Date)
+        {
+            writeDate(obj, showType);
+            return;
+        }
+        else if (obj instanceof Calendar)
+        {
+            writeCalendar(obj, showType);
+            return;
+        }
+        else if (obj instanceof Class)
+        {
+            writeClass(obj, showType);
+            return;
+        }
+
         if (writeOptionalReference(obj))
         {
             return;
@@ -564,7 +884,7 @@ public class JsonWriter extends Writer
             writeId(getId(obj));
         }
 
-        ClassMeta classInfo = getDeepDeclaredFields(obj.getClass(), _classMeta);
+        ClassMeta classInfo = getDeepDeclaredFields(obj.getClass());
         if (classInfo._writeMethod != null)
         {   // Must show type when class has custom _writeJson() method on it.
             // The JsonReader uses this to know it is dealing with an object
@@ -600,6 +920,7 @@ public class JsonWriter extends Writer
                 {
                     _out.write(',');
                 }
+
                 writeJsonUtf8String(field.getName());
                 _out.write(':');
 
@@ -630,13 +951,17 @@ public class JsonWriter extends Writer
                 {
                     writeDate(o, forceType);
                 }
+                else if (o instanceof Calendar)
+                {
+                    writeCalendar(o, forceType);
+                }
                 else if (o instanceof Class)
                 {
                     writeClass(o, forceType);
                 }
                 else if (isPrimitiveWrapper(type))
-                {   // This 'if' statement must be after String, Date, and Class check because isPrimitiveWrapper consider's them
-                    // primitives.  However, they must be handled individually, so they are handled above.
+                {   // This 'if' statement must be after String, Date, and Class check because isPrimitiveWrapper considers
+                    // them primitives.  However, they must be handled individually, so they are handled above.
                     writePrimitive(o);
                 }
                 else
@@ -684,7 +1009,7 @@ public class JsonWriter extends Writer
             char c = s.charAt(i);
 
             if (c < ' ')
-            {   // Anything less than ASCII space, write either in \\u00xx form, or the special \t, \n, etc. form
+            {    // Anything less than ASCII space, write either in \\u00xx form, or the special \t, \n, etc. form
                 if (c == '\b')
                 {
                     _out.write("\\b");
@@ -731,16 +1056,14 @@ public class JsonWriter extends Writer
     }
 
     /**
-     * @param c         Class instance
-     * @param classMeta is Map that contains the Class name to ClassMeta mappings. If
-     *                  a requested class is not in the map, it will be reflected and then added.
+     * @param c Class instance
      * @return ClassMeta which contains fields of class and customer write/read
      *         methods if they exist. The results are cached internally for performance
      *         when called again with same Class.
      */
-    static ClassMeta getDeepDeclaredFields(Class c, Map<String, ClassMeta> classMeta)
+    static ClassMeta getDeepDeclaredFields(Class c)
     {
-        ClassMeta classInfo = classMeta.get(c.getName());
+        ClassMeta classInfo = _classMetaCache.get(c.getName());
         if (classInfo != null)
         {
             return classInfo;
@@ -778,8 +1101,7 @@ public class JsonWriter extends Writer
                 throw t;
             }
             catch (Throwable ignored)
-            {
-            }
+            { }
 
             curr = curr.getSuperclass();
         }
@@ -789,18 +1111,16 @@ public class JsonWriter extends Writer
             classInfo._writeMethod = c.getDeclaredMethod("_writeJson", new Class[]{Writer.class});
         }
         catch (Exception ignored)
-        {
-        }
+        { }
 
         try
         {
             classInfo._readMethod = c.getDeclaredMethod("_readJson", new Class[]{Map.class});
         }
         catch (Exception ignored)
-        {
-        }
+        { }
 
-        classMeta.put(c.getName(), classInfo);
+        _classMetaCache.put(c.getName(), classInfo);
         return classInfo;
     }
 
@@ -831,42 +1151,5 @@ public class JsonWriter extends Writer
     {
         Long id = _objsReferenced.get(o);
         return id == null ? null : Long.toString(id);
-    }
-
-    /**
-     * Convert a Java Object to a JSON String.  This is the
-     * easy-to-use API - it returns null if there was an error.
-     *
-     * @param item Object to convert to a JSON String.
-     * @return String containing JSON representation of passed
-     *         in object, or null if an error occurred.
-     */
-    public static String toJson(Object item)
-    {
-        try
-        {
-            return objectToJson(item);
-        }
-        catch (IOException ignored)
-        {
-            return null;
-        }
-    }
-
-    /**
-     * Convert a Java Object to a JSON String.
-     *
-     * @param item Object to convert to a JSON String.
-     * @return String containing JSON representation of passed
-     *         in object.
-     * @throws java.io.IOException If an I/O error occurs
-     */
-    public static String objectToJson(Object item) throws IOException
-    {
-        ByteArrayOutputStream stream = new ByteArrayOutputStream();
-        JsonWriter writer = new JsonWriter(stream);
-        writer.write(item);
-        writer.close();
-        return new String(stream.toByteArray(), "UTF-8");
     }
 }
