@@ -12,7 +12,9 @@ import java.lang.reflect.Array;
 import java.lang.reflect.Constructor;
 import java.lang.reflect.Field;
 import java.lang.reflect.InvocationTargetException;
+import java.text.SimpleDateFormat;
 import java.util.ArrayList;
+import java.util.Calendar;
 import java.util.Collection;
 import java.util.Date;
 import java.util.HashMap;
@@ -21,8 +23,10 @@ import java.util.IdentityHashMap;
 import java.util.Iterator;
 import java.util.LinkedHashMap;
 import java.util.LinkedList;
+import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.TimeZone;
 
 /**
  * Read an object graph in JSON format and make it available in Java objects, or
@@ -53,7 +57,7 @@ import java.util.Set;
  *
  * @author John DeRegnaucourt (jdereg@gmail.com)
  *         <br/>
- *         Copyright [2010] John DeRegnaucourt
+ *         Copyright (c) John DeRegnaucourt
  *         <br/><br/>
  *         Licensed under the Apache License, Version 2.0 (the "License");
  *         you may not use this file except in compliance with the License.
@@ -69,21 +73,23 @@ import java.util.Set;
  */
 public class JsonReader extends Reader
 {
-    // Save memory by re-using common 0 values
     private static final String EMPTY_ARRAY = "~!a~";   // compared with ==
     private static final String EMPTY_OBJECT = "~!o~";  // compared with ==
     private static final Character[] _charCache = new Character[128];
     private static final Byte[] _byteCache = new Byte[256];
     private static final Map<String, String> _stringCache = new HashMap<String, String>();
     static final Set<Class> _prims = new HashSet<Class>();
-    private final Map<String, JsonWriter.ClassMeta> _classMeta = new HashMap<String, JsonWriter.ClassMeta>();
+    private static final Map<Class, Constructor> _constructors = new HashMap<Class, Constructor>();
+    private static final Map<String, Class> _nameToClass = new HashMap<String, Class>();
     private final Map<Object, JsonObject> _objsRead = new IdentityHashMap<Object, JsonObject>();
     private final Collection<UnresolvedReference> _unresolvedRefs = new ArrayList<UnresolvedReference>();
     private final Collection<Map> _maps = new ArrayList<Map>();
+    private final Collection<Object[]> _prettyMaps = new ArrayList<Object[]>();
     private final FastPushbackReader _in;
     private boolean _noObjects = false;
     private final char[] _numBuf = new char[256];
     private final StringBuilder _strBuf = new StringBuilder();
+    private SimpleDateFormat _dateFormat = new SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss.SSSZ");
 
     static
     {
@@ -120,10 +126,11 @@ public class JsonReader extends Reader
         _stringCache.put("OFF", "OFF");
         _stringCache.put("On", "On");
         _stringCache.put("Off", "Off");
-        _stringCache.put("@type", "@type");
-        _stringCache.put("@ref", "@ref");
         _stringCache.put("@id", "@id");
+        _stringCache.put("@ref", "@ref");
         _stringCache.put("@items", "@items");
+        _stringCache.put("@type", "@type");
+        _stringCache.put("@keys", "@keys");
         _stringCache.put("0", "0");
         _stringCache.put("1", "1");
         _stringCache.put("2", "2");
@@ -136,7 +143,6 @@ public class JsonReader extends Reader
         _stringCache.put("9", "9");
 
         _prims.add(Byte.class);
-        _prims.add(String.class);
         _prims.add(Integer.class);
         _prims.add(Long.class);
         _prims.add(Double.class);
@@ -144,33 +150,137 @@ public class JsonReader extends Reader
         _prims.add(Float.class);
         _prims.add(Boolean.class);
         _prims.add(Short.class);
+        _prims.add(String.class);
         _prims.add(Date.class);
         _prims.add(Class.class);
+
+        _nameToClass.put("string", String.class);
+        _nameToClass.put("boolean", boolean.class);
+        _nameToClass.put("char", char.class);
+        _nameToClass.put("byte", byte.class);
+        _nameToClass.put("short", short.class);
+        _nameToClass.put("int", int.class);
+        _nameToClass.put("long", long.class);
+        _nameToClass.put("float", float.class);
+        _nameToClass.put("double", double.class);
+        _nameToClass.put("date", Date.class);
+        _nameToClass.put("class", Class.class);
     }
 
-    private static class JsonArray extends ArrayList
-    {
-    }
+    private static class JsonArray extends ArrayList { }
 
     /**
      * LinkedHashMap used to keep fields in same order as they are
      * when reflecting them in Java.  Instances of this class hold a
      * Map-of-Map representation of a Java object, read from the JSON
      * input stream.
+     *
      * @param <String> field name in Map-of-Map
-     * @param <V> Value
+     * @param <V>      Value
      */
     private static class JsonObject<String, V> extends LinkedHashMap<String, V>
     {
         private Object target;
     }
 
+    /**
+     * UnresolvedReference is created to hold a logical pointer to a reference that
+     * could not yet be loaded, as the @ref appears ahead of the referenced object's
+     * definition.  This can point to a field reference or an array/Collection element reference.
+     */
     private static class UnresolvedReference
     {
         private JsonObject referencingObj;
         private String field;
         private long refId;
         private int index = -1;
+
+        private UnresolvedReference(JsonObject referer, String fld, long id)
+        {
+            referencingObj = referer;
+            field = fld;
+            refId = id;
+        }
+
+        private UnresolvedReference(JsonObject referer, int idx, long id)
+        {
+            referencingObj = referer;
+            index = idx;
+            refId = id;
+        }
+    }
+
+    /**
+     * Convert the passed in JSON string into a Java object graph.
+     *
+     * @param json String JSON input
+     * @return Java object graph matching JSON input, or null if an
+     *         error occurred.
+     */
+    public static Object toJava(String json)
+    {
+        try
+        {
+            return jsonToJava(json);
+        }
+        catch (Exception ignored)
+        {
+            return null;
+        }
+    }
+
+    /**
+     * Convert the passed in JSON string into a Java object graph.
+     *
+     * @param json String JSON input
+     * @return Java object graph matching JSON input
+     * @throws java.io.IOException If an I/O error occurs
+     */
+    public static Object jsonToJava(String json) throws IOException
+    {
+        ByteArrayInputStream ba = new ByteArrayInputStream(json.getBytes("UTF-8"));
+        JsonReader jr = new JsonReader(ba, false);
+        return jr.readObject();
+    }
+
+    /**
+     * Convert the passed in JSON string into a Java object graph
+     * that consists solely of Java Maps where the keys are the
+     * fields and the values are primitives or other Maps (in the
+     * case of objects).
+     *
+     * @param json String JSON input
+     * @return Java object graph of Maps matching JSON input,
+     *         or null if an error occurred.
+     */
+    public static Map toMaps(String json)
+    {
+        try
+        {
+            return jsonToMaps(json);
+        }
+        catch (Exception ignored)
+        {
+            return null;
+        }
+    }
+
+    /**
+     * Convert the passed in JSON string into a Java object graph
+     * that consists solely of Java Maps where the keys are the
+     * fields and the values are primitives or other Maps (in the
+     * case of objects).
+     *
+     * @param json String JSON input
+     * @return Java object graph of Maps matching JSON input,
+     *         or null if an error occurred.
+     * @throws java.io.IOException If an I/O error occurs
+     */
+    public static Map jsonToMaps(String json) throws IOException
+    {
+        ByteArrayInputStream ba = new ByteArrayInputStream(json.getBytes("UTF-8"));
+        JsonReader jr = new JsonReader(ba, true);
+        return (Map) jr.readObject();
     }
 
     public JsonReader(InputStream in)
@@ -193,8 +303,9 @@ public class JsonReader extends Reader
 
     /**
      * Finite State Machine (FSM) used to parse the JSON input.
+     *
      * @return Java Object graph constructed from InputStream supplying
-     * JSON serialized content.
+     *         JSON serialized content.
      * @throws IOException for stream errors or parsing errors.
      */
     public Object readObject() throws IOException
@@ -221,6 +332,7 @@ public class JsonReader extends Reader
         _objsRead.clear();
         _unresolvedRefs.clear();
         _maps.clear();
+        _prettyMaps.clear();
         return graph;
     }
 
@@ -228,33 +340,42 @@ public class JsonReader extends Reader
      * Walk a JsonObject (Map of String keys to values) and return the
      * Java object equivalent filled in as best as possible (everything
      * except unresolved reference fields or unresolved array/collection elements).
+     *
      * @param root JsonObject reference to a Map-of-Maps representation of the JSON
-     * input after it has been completely read.
+     *             input after it has been completely read.
      * @return Properly constructed, typed, Java object graph built from a Map
-     * of Maps representation (JsonObject root).
+     *         of Maps representation (JsonObject root).
      * @throws IOException for stream errors or parsing errors.
      */
     private Object convertMapsToObjects(JsonObject<String, Object> root) throws IOException
     {
         LinkedList<JsonObject<String, Object>> stack = new LinkedList<JsonObject<String, Object>>();
-        stack.push(root);
+        stack.addFirst(root);
 
         while (!stack.isEmpty())
         {
             JsonObject<String, Object> jsonObj = stack.removeFirst();
-            Object javaMate = jsonObj.target;
+            final Object javaMate = jsonObj.target;
 
             if (javaMate.getClass().isArray())
-            {   // Handle assigning Map to javaMate that is an []
+            {    // Handle assigning Map to javaMate that is an []
                 traverseArray(stack, jsonObj);
             }
+            else if ((javaMate instanceof Collection) && jsonObj.containsKey("@items"))
+            {
+                traverseCollection(stack, jsonObj);
+            }
+            else if (javaMate instanceof Map && jsonObj.containsKey("@keys") && jsonObj.containsKey("@items"))
+            {
+                traverseMap(stack, jsonObj);
+            }
             else
-            {   // Assign Map of field value pairs to javaMate.
-                traverseFields(stack, jsonObj);
+            {
                 if (javaMate instanceof Map)
-                {   // All Maps are processed later to fix up their internal indexing structure
-                    _maps.add((Map) javaMate);
+                {
+                    _maps.add((Map) javaMate);      // List of maps to be rebuilt (re-indexed)
                 }
+                traverseFields(stack, jsonObj);
             }
         }
         return root.target;
@@ -265,7 +386,8 @@ public class JsonReader extends Reader
      * assign the list of items in the JsonObject (stored in the @items field)
      * to each array element.  All array elements are processed excluding elements
      * that reference an unresolved object.  These are filled in later.
-     * @param stack a Stack (LinkedList) used to support graph traversal.
+     *
+     * @param stack   a Stack (LinkedList) used to support graph traversal.
      * @param jsonObj a Map-of-Map representation of the JSON input stream.
      * @throws IOException for stream errors or parsing errors.
      */
@@ -285,7 +407,7 @@ public class JsonReader extends Reader
             byte[] bytes = (byte[]) array;
             for (int i = 0; i < len; i++)
             {
-                bytes[i] = ((Long) items.get(i)).byteValue();
+                bytes[i] = ((Number) items.get(i)).byteValue();
             }
             return;
         }
@@ -301,16 +423,15 @@ public class JsonReader extends Reader
                 Array.set(array, i, null);
             }
             else if (element == EMPTY_OBJECT)
-            {   // Use either explicitly defined type in ObjectMap associated to JSON, or array component type.
-                JsonObject jsonElement = new JsonObject();
-                Object arrayElement = createJavaObjectInstance(compType, jsonElement);
+            {    // Use either explicitly defined type in ObjectMap associated to JSON, or array component type.
+                Object arrayElement = createJavaObjectInstance(compType, new JsonObject());
                 Array.set(array, i, arrayElement);
             }
             else if (element instanceof JsonArray)
             {   // Array of arrays
                 if (char[].class.equals(compType))
                 {   // Specially handle char[] because we are writing these
-                    // out as UTF8 strings for compactness and speed.
+                    // out as UTF-8 strings for compactness and speed.
                     JsonArray jsonArray = (JsonArray) element;
                     if (jsonArray.size() == 0)
                     {
@@ -339,50 +460,175 @@ public class JsonReader extends Reader
             else if (element instanceof JsonObject)
             {
                 JsonObject<String, Object> jsonObject = (JsonObject<String, Object>) element;
-                Number ref = (Number) jsonObject.get("@ref");
+                Long ref = (Long) jsonObject.get("@ref");
 
                 if (ref != null)
-                {   // Connect reference
+                {    // Connect reference
                     JsonObject refObject = _objsRead.get(ref);
                     if (refObject != null && refObject.target != null)
                     {   // Array element with @ref to existing object
                         Array.set(array, i, refObject.target);
                     }
                     else
-                    {   // Array with a forward @ref as an element
-                        UnresolvedReference uRef = new UnresolvedReference();
-                        uRef.referencingObj = jsonObj;
-                        uRef.index = i;
-                        uRef.refId = ref.longValue();
-                        _unresolvedRefs.add(uRef);
+                    {    // Array with a forward @ref as an element
+                        _unresolvedRefs.add(new UnresolvedReference(jsonObj, i, ref));
                     }
                 }
                 else
-                {   // Convert JSON HashMap to Java Object instance and assign values
+                {    // Convert JSON HashMap to Java Object instance and assign values
                     Object arrayElement = createJavaObjectInstance(compType, jsonObject);
                     Array.set(array, i, arrayElement);
                     if (!isPrimitive(arrayElement.getClass()))
-                    {   // Skip walking primitives, primitive wrapper classes, Dates, Strings, and Classes
+                    {    // Skip walking primitives, primitive wrapper classes, Dates, Strings, and Classes
                         stack.addFirst(jsonObject);
                     }
                 }
             }
             else if (isPrimitive)
-            {
+            {   // Primitive component type array
                 Array.set(array, i, newPrimitiveWrapper(compType, element));
             }
             else
-            {   // Object[] with polymorphic types
+            {   // Setting primitive values into an Object[]
                 Array.set(array, i, element);
             }
         }
+    }
+
+    /**
+     * Process java.util.Collection and it's derivatives.  Collections are written specially
+     * so that the serialization does not expose the Collection's internal structure, for
+     * example a TreeSet.  All entries are processed, except unresolved references, which
+     * are filled in later.  For an indexable collection, the unresolved references are set
+     * back into the proper element location.  For non-indexable collections (Sets), the
+     * unresolved references are added via .add().
+     */
+    private void traverseCollection(LinkedList<JsonObject<String, Object>> stack, JsonObject jsonObj) throws IOException
+    {
+        JsonArray items = (JsonArray) jsonObj.get("@items");
+
+        if (items == null)
+        {
+            return;
+        }
+
+        Collection col = (Collection) jsonObj.target;
+        Iterator i = items.iterator();
+        boolean isList = col instanceof List;
+        int idx = 0;
+
+        while (i.hasNext())
+        {
+            Object element = i.next();
+
+            if (element == null)
+            {
+                col.add(null);
+            }
+            else if (element == EMPTY_OBJECT)
+            {    // Use either explicitly defined type in ObjectMap associated to JSON, or array component type.
+                col.add(createJavaObjectInstance(Object.class, jsonObj));
+            }
+            else if (element instanceof String || element instanceof Boolean || element instanceof Double || element instanceof Long)
+            {    // Allow Strings, Booleans, Longs, and Doubles  to be "inline" without Java object decoration (@id, @type, etc.)
+                col.add(element);
+            }
+            else if (element instanceof JsonArray)
+            {
+                JsonObject jObj = new JsonObject();
+                jObj.put("@items", element);
+                createJavaObjectInstance(Object.class, jObj);
+                col.add(jObj.target);
+                convertMapsToObjects(jObj);
+            }
+            else if (element instanceof JsonObject)
+            {
+                JsonObject jObj = (JsonObject) element;
+                Long ref = (Long) jObj.get("@ref");
+
+                if (ref != null)
+                {
+                    JsonObject refObject = _objsRead.get(ref);
+                    if (refObject != null && refObject.target != null)
+                    {
+                        col.add(refObject.target);
+                    }
+                    else
+                    {
+                        _unresolvedRefs.add(new UnresolvedReference(jsonObj, idx, ref));
+                        if (isList)
+                        {   // Indexable collection, so set 'null' as element for now - will be patched in later.
+                            col.add(null);
+                        }
+                    }
+                }
+                else
+                {
+                    createJavaObjectInstance(Object.class, jObj);
+
+                    if (!isPrimitive(jObj.target.getClass()))
+                    {
+                        convertMapsToObjects(jObj);
+                    }
+                    col.add(jObj.target);
+                }
+            }
+            else
+            {
+                throw new IOException("Encountered unknown type - " + element.getClass().getName());
+            }
+            idx++;
+        }
+    }
+
+    /**
+     * Process java.util.Map and it's derivatives.  These can be written specially
+     * so that the serialization would not expose the derivative class internals
+     * (internal fields of TreeMap for example).
+     */
+    private void traverseMap(LinkedList<JsonObject<String, Object>> stack, JsonObject jsonObj) throws IOException
+    {
+        // Convert @keys to a Collection of Java objects.
+        JsonArray keys = (JsonArray) jsonObj.get("@keys");
+        JsonArray items = (JsonArray) jsonObj.get("@items");
+
+        if (keys == null || items == null)
+        {
+            if (keys != items)
+            {
+                throw new IOException("Map written where one of @keys or @items is empty, jsonObject:\n" + jsonObj);
+            }
+            return;
+        }
+
+        JsonObject jsonKeyCollection = new JsonObject();
+        jsonKeyCollection.put("@items", keys);
+        Collection javaKeys = new ArrayList();
+        jsonKeyCollection.target = javaKeys;
+        stack.addFirst(jsonKeyCollection);
+
+        // Convert @items to a Collection of Java objects.
+        JsonObject jsonItemCollection = new JsonObject();
+        jsonItemCollection.put("@items", items);
+        Collection javaValues = new ArrayList();
+        jsonItemCollection.target = javaValues;
+        stack.addFirst(jsonItemCollection);
+
+        if (javaKeys.size() != javaValues.size())
+        {
+            throw new IOException("Map written with @keys and @items entries of different sizes, jsonObject:\n" + jsonObj);
+        }
+
+        // Save these for later so that unresolved references inside keys or values
+        // get patched first, and then build the Maps.
+        _prettyMaps.add(new Object[]{jsonObj.target, javaKeys, javaValues});
     }
 
     private void traverseFields(LinkedList<JsonObject<String, Object>> stack, JsonObject<String, Object> jsonObj) throws IOException
     {
         Object javaMate = jsonObj.target;
 
-        JsonWriter.ClassMeta meta = JsonWriter.getDeepDeclaredFields(javaMate.getClass(), _classMeta);
+        JsonWriter.ClassMeta meta = JsonWriter.getDeepDeclaredFields(javaMate.getClass());
 
         if (meta._readMethod != null)
         {
@@ -414,12 +660,11 @@ public class JsonReader extends Reader
                     continue;
                 }
 
-                Object rhs = e.getValue();
                 Field field = getDeclaredField(cls, key);
 
                 if (field != null)
                 {
-                    assignField(stack, jsonObj, field, rhs);
+                    assignField(stack, jsonObj, field, e.getValue());
                 }
             }
         }
@@ -427,11 +672,12 @@ public class JsonReader extends Reader
 
     /**
      * Map Json Map object field to Java object field.
-     * @param stack Stack (LinkedList) used for graph traversal.
+     *
+     * @param stack   Stack (LinkedList) used for graph traversal.
      * @param jsonObj a Map-of-Map representation of the current object being examined (containing all fields).
-     * @param field a Java Field object representing where the jsonObj should be converted and stored.
-     * @param rhs the JSON value that will be converted and stored in the 'field' on the associated
-     * Java target object. 
+     * @param field   a Java Field object representing where the jsonObj should be converted and stored.
+     * @param rhs     the JSON value that will be converted and stored in the 'field' on the associated
+     *                Java target object.
      * @throws IOException for stream errors or parsing errors.
      */
     private void assignField(LinkedList<JsonObject<String, Object>> stack, JsonObject jsonObj, Field field, Object rhs) throws IOException
@@ -450,7 +696,7 @@ public class JsonReader extends Reader
                 field.set(target, newInstance(fieldType));
             }
             else if (rhs instanceof JsonArray)
-            {   // LHS of assignment is an [] field OR right handside is an array and LHS is Object
+            {    // LHS of assignment is an [] field OR right handside is an array and LHS is Object
                 JsonArray elements = (JsonArray) rhs;
                 JsonObject<String, Object> jsonArray = new JsonObject<String, Object>();
                 if (char[].class.equals(fieldType))
@@ -462,14 +708,7 @@ public class JsonReader extends Reader
                     }
                     else
                     {
-                        String value = (String) elements.get(0);
-                        int numChars = value.length();
-                        char[] chars = new char[numChars];
-                        for (int i = 0; i < numChars; i++)
-                        {
-                            chars[i] = value.charAt(i);
-                        }
-                        field.set(target, chars);
+                        field.set(target, ((String) elements.get(0)).toCharArray());
                     }
                 }
                 else
@@ -482,11 +721,11 @@ public class JsonReader extends Reader
             }
             else if (rhs instanceof JsonObject)
             {
-                JsonObject<String, Object> jObj = (JsonObject<String, Object>) rhs;
-                Number ref = (Number) jObj.get("@ref");
+                JsonObject<String, Object> jObj = (JsonObject) rhs;
+                Long ref = (Long) jObj.get("@ref");
 
                 if (ref != null)
-                {   // Correct field references
+                {    // Correct field references
                     JsonObject refObject = _objsRead.get(ref);
                     if (refObject != null && refObject.target != null)
                     {
@@ -494,28 +733,25 @@ public class JsonReader extends Reader
                     }
                     else
                     {
-                        UnresolvedReference uRef = new UnresolvedReference();
-                        uRef.referencingObj = jsonObj;
-                        uRef.field = field.getName();
-                        uRef.refId = ref.longValue();
-                        _unresolvedRefs.add(uRef);
+                        _unresolvedRefs.add(new UnresolvedReference(jsonObj, field.getName(), ref));
                     }
                 }
                 else
-                {   // Assign ObjectMap's to Object (or derived) fields
+                {    // Assign ObjectMap's to Object (or derived) fields
                     field.set(target, createJavaObjectInstance(fieldType, jObj));
                     if (!isPrimitive(jObj.target.getClass()))
                     {
-                        stack.addFirst((JsonObject<String, Object>) rhs);
+                        stack.addFirst((JsonObject) rhs);
                     }
                 }
             }
             else if (isPrimitive(fieldType))
-            {   // field.set() will convert primitive wrapper objects to primitives for assignment to member
+            {    // field.set() will convert primitive wrapper objects to primitives for assignment to member
                 field.set(target, newPrimitiveWrapper(fieldType, rhs));
             }
             else
             {
+                // Object field type with a primitive RHS
                 field.set(target, rhs);
             }
         }
@@ -534,10 +770,11 @@ public class JsonReader extends Reader
      * <p/>
      * The '@type' is not usually specified that much in the JSON input stream, as in
      * many cases it can be inferred from a field reference or array component type.
-     * @param clazz Instance will be create of this class.
+     *
+     * @param clazz   Instance will be create of this class.
      * @param jsonObj Map-of-Map representation of object to create.
      * @return a new Java object of the appropriate type (clazz) using the jsonObj to provide
-     * enough hints to get the right class instantiated.  It is not populated when returned. 
+     *         enough hints to get the right class instantiated.  It is not populated when returned.
      * @throws IOException for stream errors or parsing errors.
      */
     private Object createJavaObjectInstance(Class clazz, JsonObject jsonObj) throws IOException
@@ -547,10 +784,10 @@ public class JsonReader extends Reader
 
         // @type always takes precedence over inferred Java (clazz) type.
         if (type != null)
-        {   // @type is explicitly set, use that as it always takes precedence
+        {    // @type is explicitly set, use that as it always takes precedence
             Class c = classForName(type);
             if (c.isArray())
-            {   // Handle []
+            {    // Handle []
                 JsonArray items = (JsonArray) jsonObj.get("@items");
                 if (items == null)
                 {
@@ -559,7 +796,7 @@ public class JsonReader extends Reader
                 mate = Array.newInstance(c.getComponentType(), items.size());
             }
             else
-            {   // Handle regular field.object reference
+            {    // Handle regular field.object reference
                 if (isPrimitive(c))
                 {
                     mate = newPrimitiveWrapper(c, jsonObj.get("value"));
@@ -571,7 +808,7 @@ public class JsonReader extends Reader
             }
         }
         else
-        {   // @type, not specified, figure out appropriate type
+        {    // @type, not specified, figure out appropriate type
             JsonArray items = (JsonArray) jsonObj.get("@items");
 
             // if @items is specified, it must be an [] type.
@@ -586,9 +823,9 @@ public class JsonReader extends Reader
                 mate = Array.newInstance(clazz.isArray() ? clazz.getComponentType() : Object.class, items.size());
             }
             else
-            {   // Definitely not an [] type.
+            {    // Definitely not an [] type.
                 if (isPrimitive(clazz))
-                {   // If it is a primitive wrapper, String, Date, or Class
+                {    // If it is a primitive wrapper, String, Date, or Class
                     mate = newPrimitiveWrapper(clazz, jsonObj.get("value"));
                 }
                 else if (clazz.equals(Object.class) && jsonObj.containsKey("value"))
@@ -596,7 +833,7 @@ public class JsonReader extends Reader
                     mate = jsonObj.get("value");
                 }
                 else
-                {   // Use the passed in class type
+                {    // Use the passed in class type
                     mate = newInstance(clazz);
                 }
             }
@@ -629,7 +866,7 @@ public class JsonReader extends Reader
                     {
                         c = skipWhitespaceRead();
                         if (c == '}')
-                        {   // empty object
+                        {    // empty object
                             return EMPTY_OBJECT;
                         }
                         _in.unread(c);
@@ -671,7 +908,7 @@ public class JsonReader extends Reader
                     {
                         Object o = readArray();
                         if (field == null)
-                        {   // field is null when you have an untyped Object[], so we place
+                        {    // field is null when you have an untyped Object[], so we place
                             // the JsonArray on the @items field.
                             field = "@items";
                         }
@@ -723,26 +960,33 @@ public class JsonReader extends Reader
 
     /**
      * Read non-Array value
+     *
      * @return Object that represents a JSON value.  See JSON specification for
-     * exactly what a 'value' can be.
+     *         exactly what a 'value' can be.
      * @throws IOException for stream errors or parsing errors.
      */
     private Object readValue() throws IOException
     {
         int c = _in.read();
 
-        if (c == '"')
-        {
-            return readString();
-        }
-        else if (isDigit(c) || c == '-')
+        if (isDigit(c) || c == '-')
         {
             return readNumber(c);
+        }
+        else if (c == '"')
+        {
+            return readString();
         }
         else if (c == '{')
         {
             _in.unread('{');
             return readIntoJsonMaps();
+        }
+        else if (c == 'n' || c == 'N')
+        {
+            _in.unread(c);
+            readToken("null");
+            return null;
         }
         else if (c == 't' || c == 'T')
         {
@@ -756,12 +1000,6 @@ public class JsonReader extends Reader
             readToken("false");
             return Boolean.FALSE;
         }
-        else if (c == 'n' || c == 'N')
-        {
-            _in.unread(c);
-            readToken("null");
-            return null;
-        }
         else
         {
             throw new IOException("Unknown value type at position " + _in.getPos());
@@ -770,9 +1008,10 @@ public class JsonReader extends Reader
 
     /**
      * Read a JSON array
+     *
      * @return a JsonArray (ArrayList) containing the parsed items from the
-     * [] in JSON.  These will be stored in simple forms like Double, Boolean,
-     * null, Long, String, or JsonObject for non-primitive types.
+     *         [] in JSON.  These will be stored in simple forms like Double, Boolean,
+     *         null, Long, String, or JsonObject for non-primitive types.
      * @throws IOException for stream errors or parsing errors.
      */
     private Object readArray() throws IOException
@@ -824,47 +1063,40 @@ public class JsonReader extends Reader
      * throw an IOException indicating that.  Converting to c to
      * (char) c is acceptable because the 'tokens' allowed in a
      * JSON input stream (true, false, null) are all ASCII.
-     * @param token String token to read from file.  Currently only 'true', 'false',
-     * or 'null' are used.
-     * @return a String token from the file.
-     * @throws IOException for stream errors or parsing errors.
      */
     private String readToken(String token) throws IOException
     {
-		int len = token.length();
+        int len = token.length();
 
-		for (int i=0; i < len; i++)
-		{
-            if (token.charAt(i) != (char) _in.read())
-			{
-				throw new IOException("Expected token '" + token + "' at position " + _in.getPos());
-			}
-		}
+        for (int i = 0; i < len; i++)
+        {
+            int c = _in.read();
+            c = Character.toLowerCase((char) c);
+            int loTokenChar = token.charAt(i);
 
-		return token;
+            if (loTokenChar != c)
+            {
+                throw new IOException("Expected token '" + token + "' at position " + _in.getPos());
+            }
+        }
+
+        return token;
     }
 
     /**
      * Read a JSON number
+     *
      * @param c int a character representing the first digit of the number that
-     * was already read.
+     *          was already read.
      * @return a Number (a Long or a Double) depending on whether the number is
-     * a decimal number or integer.  This choice allows all smaller types (Float, int, short, byte)
-     * to be represented as well.
+     *         a decimal number or integer.  This choice allows all smaller types (Float, int, short, byte)
+     *         to be represented as well.
      * @throws IOException for stream errors or parsing errors.
      */
     private Number readNumber(int c) throws IOException
     {
-        int len = 0;
-
-        if (isDigit(c) || c == '-')
-        {
-            _numBuf[len++] = (char) c;
-        }
-        else
-        {
-            throw new IOException("Invalid JSON number character at position " + _in.getPos());
-        }
+        _numBuf[0] = (char) c;
+        int len = 1;
         boolean isFloat = false;
 
         try
@@ -909,7 +1141,7 @@ public class JsonReader extends Reader
         {
             boolean isNeg = _numBuf[0] == '-';
             long n = 0;
-            for (int i=(isNeg ? 1 : 0); i < len; i++)
+            for (int i = (isNeg ? 1 : 0); i < len; i++)
             {
                 n = (_numBuf[i] - '0') + n * 10;
             }
@@ -920,7 +1152,8 @@ public class JsonReader extends Reader
     /**
      * Read a JSON string
      * This method assumes the initial quote has already been read.
-     * @return String read from JSON input stream. 
+     *
+     * @return String read from JSON input stream.
      * @throws IOException for stream errors or parsing errors.
      */
     private String readString() throws IOException
@@ -1023,7 +1256,7 @@ public class JsonReader extends Reader
                     }
                     else
                     {
-                        throw new IOException("Expected hexadecimal digits at position " + _in.getPos());
+                        throw new IOException("Expected hexidecimal digits at position " + _in.getPos());
                     }
                     break;
 
@@ -1033,47 +1266,99 @@ public class JsonReader extends Reader
             }
         }
 
-		String s = _strBuf.toString();
-		String cacheHit = _stringCache.get(s);
-        return cacheHit == null ? s : cacheHit;
+        String s = _strBuf.toString();
+        String cacheHit = _stringCache.get(s);
+        if (cacheHit == null)
+        {
+            return s;
+        }
+        return cacheHit;
     }
 
     private Object newInstance(Class c) throws IOException
     {
+        // See if constructor cached first
+        Constructor constructor = _constructors.get(c);
+        if (constructor != null)
+        {
+            Class[] paramTypes = constructor.getParameterTypes();
+            if (paramTypes == null || paramTypes.length == 0)
+            {
+                try
+                {
+                    return constructor.newInstance();
+                }
+                catch (Exception e)
+                {
+                    throw new IOException("Could not instantiate " + c.getName());
+                }
+            }
+            else
+            {
+                Object[] values = fillArgs(paramTypes);
+                try
+                {
+                    return constructor.newInstance(values);
+                }
+                catch (Exception e)
+                {
+                    throw new IOException("Could not instantiate " + c.getName());
+                }
+
+            }
+        }
+        Object[] ret = newInstanceEx(c);
+        _constructors.put(c, (Constructor) ret[0]);
+        return ret[1];
+    }
+
+    /**
+     * Return constructor and instance as elements 0 and 1, respectively.
+     */
+    private Object[] newInstanceEx(Class c) throws IOException
+    {
         try
         {
-            // Try no-arg constructor first.
-            return c.newInstance();
+            Constructor constructor = c.getConstructor(null);
+            if (constructor != null)
+            {
+                return new Object[] {constructor, constructor.newInstance()};
+            }
+            return tryOtherConstructors(c);
         }
         catch (Exception e)
         {
             // OK, this class does not have a public no-arg constructor.  Instantiate with
             // first constructor found, filling in constructor values with null or
             // defaults for primitives.
-            Constructor[] constructors = c.getDeclaredConstructors();
-            if (constructors.length == 0)
-            {
-                throw new IOException("Cannot instantiate '" + c.getName() + "' - Primitive, interface, array[] or void at position " + _in.getPos());
-            }
-
-            // Try each constructor (private, protected, or public) with default values until
-            // the object instantiates without exception.
-            for (Constructor constructor : constructors)
-            {
-                constructor.setAccessible(true);
-                Class[] argTypes = constructor.getParameterTypes();
-                Object[] values = fillArgs(argTypes);
-                try
-                {
-                    return constructor.newInstance(values);
-                }
-                catch (Exception ignored)
-                {
-                }
-            }
-
-            throw new IOException("Could not instantiate " + c.getName() + " using any constructor");
+            return tryOtherConstructors(c);
         }
+    }
+
+    private Object[] tryOtherConstructors(Class c) throws IOException
+    {
+        Constructor[] constructors = c.getDeclaredConstructors();
+        if (constructors.length == 0)
+        {
+            throw new IOException("Cannot instantiate '" + c.getName() + "' - Primitive, interface, array[] or void at position " + _in.getPos());
+        }
+
+        // Try each constructor (private, protected, or public) with default values until
+        // the object instantiates without exception.
+        for (Constructor constructor : constructors)
+        {
+            constructor.setAccessible(true);
+            Class[] argTypes = constructor.getParameterTypes();
+            Object[] values = fillArgs(argTypes);
+            try
+            {
+                return new Object[] {constructor, constructor.newInstance(values)};
+            }
+            catch (Exception ignored)
+            { }
+        }
+
+        throw new IOException("Could not instantiate " + c.getName() + " using any constructor");
     }
 
     private static Object[] fillArgs(Class[] argTypes)
@@ -1127,15 +1412,14 @@ public class JsonReader extends Reader
 
     private static boolean isPrimitive(Class c)
     {
-        return c.isPrimitive() || _prims.contains(c);
+        return c.isPrimitive() || _prims.contains(c) || Calendar.class.isAssignableFrom(c);
     }
 
     private Object newPrimitiveWrapper(Class c, Object rhs) throws IOException
     {
         if (c.equals(Byte.class) || c.equals(byte.class))
         {
-            Long num = (Long) rhs;
-            return _byteCache[num.byteValue() + 128];
+            return _byteCache[((Number) rhs).byteValue() + 128];
         }
         else if (c.equals(String.class))
         {
@@ -1143,12 +1427,12 @@ public class JsonReader extends Reader
             return cache != null ? cache : rhs;
         }
         else if (c.equals(Boolean.class) || c.equals(boolean.class))
-        {   // Booleans are tokenized into Boolean.TRUE or Boolean.FALSE
+        {    // Booleans are tokenized into Boolean.TRUE or Boolean.FALSE
             return rhs;
         }
         else if (c.equals(Integer.class) || c.equals(int.class))
         {
-            return ((Long) rhs).intValue();
+            return ((Number) rhs).intValue();
         }
         else if (c.equals(Long.class) || c.equals(long.class))
         {
@@ -1164,7 +1448,7 @@ public class JsonReader extends Reader
         }
         else if (c.equals(Short.class) || c.equals(short.class))
         {
-            return ((Long) rhs).shortValue();
+            return ((Number) rhs).shortValue();
         }
         else if (c.equals(Float.class) || c.equals(float.class))
         {
@@ -1178,6 +1462,35 @@ public class JsonReader extends Reader
         {
             return classForName((String) rhs);
         }
+        else if (Calendar.class.isAssignableFrom(c))
+        {
+            try
+            {
+                Date date = _dateFormat.parse((String) rhs);
+                Calendar calendar = (Calendar) c.newInstance();
+                calendar.setTime(date);
+
+                try
+                {   // If time zone is specified at the end in (EST), then place this calendar
+                    // in that timezone, without shifting the absolute time.
+                    String dateStr = (String) rhs;
+                    int idx = dateStr.indexOf('(');
+                    if (idx == -1)
+                    {
+                        return calendar;
+                    }
+                    String tz = dateStr.substring(idx + 1, dateStr.length() - 1);
+                    calendar.setTimeZone(TimeZone.getTimeZone(tz));
+                }
+                catch (Exception ignored)
+                { }
+                return calendar;
+            }
+            catch (Exception e)
+            {
+                throw new IOException("Failed to parse date: " + rhs);
+            }
+        }
 
         throw new IOException("Class '" + c.getName() + "' requested for special instantiation.");
     }
@@ -1189,7 +1502,7 @@ public class JsonReader extends Reader
 
     private static boolean isWhitespace(int c)
     {
-        return c == ' ' || c == '\t' || c == '\n' || c == '\r' || c == '\f' || c == '\b';
+        return c == ' ' || c == '\t' || c == '\n' || c == '\r';
     }
 
     private Class classForName(String name) throws IOException
@@ -1200,49 +1513,10 @@ public class JsonReader extends Reader
         }
         try
         {
-            if ("string".equals(name))
+            Class c = _nameToClass.get(name);
+            if (c != null)
             {
-                return String.class;
-            }
-            else if ("boolean".equalsIgnoreCase(name))
-            {
-                return boolean.class;
-            }
-            else if ("char".equalsIgnoreCase(name))
-            {
-                return char.class;
-            }
-            else if ("byte".equals(name))
-            {
-                return byte.class;
-            }
-            else if ("short".equals(name))
-            {
-                return short.class;
-            }
-            else if ("int".equals(name))
-            {
-                return int.class;
-            }
-            else if ("long".equals(name))
-            {
-                return long.class;
-            }
-            else if ("float".equals(name))
-            {
-                return float.class;
-            }
-            else if ("double".equals(name))
-            {
-                return double.class;
-            }
-            else if ("date".equals(name))
-            {
-                return Date.class;
-            }
-            else if ("class".equals(name))
-            {
-                return Class.class;
+                return c;
             }
             else
             {
@@ -1267,21 +1541,23 @@ public class JsonReader extends Reader
      * method will start on the Class passed in, and if not found there, will
      * walk up super classes until it finds the field, or throws an IOException
      * if it cannot find the field.
+     *
      * @param c Class containing the desired field.
      * @param fieldName String name of the desired field.
      * @return Field object obtained from the passed in class (by name).  The Field
-     * returned is cached so that it is only obtained via reflection once.
+     *         returned is cached so that it is only obtained via reflection once.
      * @throws IOException for stream errors or parsing errors.
      */
     private Field getDeclaredField(Class c, String fieldName) throws IOException
     {
-        JsonWriter.ClassMeta meta = JsonWriter.getDeepDeclaredFields(c, _classMeta);
+        JsonWriter.ClassMeta meta = JsonWriter.getDeepDeclaredFields(c);
         return meta.get(fieldName);
     }
 
     /**
      * Read until non-whitespace character and then return it.
      * This saves extra read/pushback.
+     *
      * @return int repesenting the next non-whitespace character in the stream.
      * @throws IOException for stream errors or parsing errors.
      */
@@ -1316,6 +1592,11 @@ public class JsonReader extends Reader
         }
     }
 
+    /**
+     * For all fields where the value was "@ref":"n" where 'n' was the id of an object
+     * that had not yet been encountered in the stream, make the final substition.
+     * @throws IOException
+     */
     private void patchUnresolvedReferences() throws IOException
     {
         Iterator i = _unresolvedRefs.iterator();
@@ -1344,17 +1625,30 @@ public class JsonReader extends Reader
             }
 
             if (ref.index >= 0)
-            {   // Fix []'s containing a forward reference.
-                Array.set(objToFix, ref.index, objReferenced.target);       // patch array element here
+            {    // Fix []'s and Collections containing a forward reference.
+                if (objToFix instanceof List)
+                {   // Patch up Indexable Collections
+                    List list = (List) objToFix;
+                    list.set(ref.index, objReferenced.target);
+                }
+                else if (objToFix instanceof Collection)
+                {   // Add element (since it was not indexable, add it to collection)
+                    Collection col = (Collection) objToFix;
+                    col.add(objReferenced.target);
+                }
+                else
+                {
+                    Array.set(objToFix, ref.index, objReferenced.target);        // patch array element here
+                }
             }
             else
-            {   // Fix field forward reference
+            {    // Fix field forward reference
                 Field field = getDeclaredField(objToFix.getClass(), ref.field);
                 if (field != null)
                 {
                     try
                     {
-                        field.set(objToFix, objReferenced.target);              // patch field here
+                        field.set(objToFix, objReferenced.target);               // patch field here
                     }
                     catch (Exception e)
                     {
@@ -1409,6 +1703,21 @@ public class JsonReader extends Reader
                 map.put(entry.getKey(), entry.getValue());
             }
         }
+
+        for (Object[] mapPieces : _prettyMaps)
+        {
+            Map map = (Map) mapPieces[0];
+            Collection javaKeys = (Collection) mapPieces[1];
+            Collection javaValues = (Collection) mapPieces[2];
+
+            Iterator x = javaKeys.iterator();
+            Iterator y = javaValues.iterator();
+
+            while (x.hasNext())
+            {
+                map.put(x.next(), y.next());
+            }
+        }
     }
 
     public int read(char[] cbuf, int off, int len) throws IOException
@@ -1418,9 +1727,10 @@ public class JsonReader extends Reader
 
     /**
      * This is a performance optimization.  The lowest 128 characters are re-used.
+     *
      * @param c char to match to a Character.
      * @return a Character that matches the passed in char.  If the valuye is
-     * less than 127, then the same Character instances are re-used.
+     *         less than 127, then the same Character instances are re-used.
      */
     private static Character valueOf(char c)
     {
@@ -1435,12 +1745,12 @@ public class JsonReader extends Reader
     private static char[] toChars(int codePoint)
     {
         if (codePoint < 0 || codePoint > MAX_CODE_POINT)
-        {   // int UTF-8 char must be in range
+        {    // int UTF-8 char must be in range
             throw new IllegalArgumentException();
         }
 
         if (codePoint < MIN_SUPPLEMENTARY_CODE_POINT)
-        {   // if the int character fits in two bytes...
+        {    // if the int character fits in two bytes...
             return new char[]{(char) codePoint};
         }
 
@@ -1520,78 +1830,5 @@ public class JsonReader extends Reader
             _buf = null;
             _pos = 0;
         }
-    }
-
-    /**
-     * Convert the passed in JSON string into a Java object graph.
-     *
-     * @param json String JSON input
-     * @return Java object graph matching JSON input, or null if an
-     *         error occurred.
-     */
-    public static Object toJava(String json)
-    {
-        try
-        {
-            return jsonToJava(json);
-        }
-        catch (Exception ignored)
-        {
-            return null;
-        }
-    }
-
-    /**
-     * Convert the passed in JSON string into a Java object graph.
-     *
-     * @param json String JSON input
-     * @return Java object graph matching JSON input
-     * @throws java.io.IOException If an I/O error occurs
-     */
-    public static Object jsonToJava(String json) throws IOException
-    {
-        ByteArrayInputStream ba = new ByteArrayInputStream(json.getBytes("UTF-8"));
-        JsonReader jr = new JsonReader(ba, false);
-        return jr.readObject();
-    }
-
-    /**
-     * Convert the passed in JSON string into a Java object graph
-     * that consists solely of Java Maps where the keys are the
-     * fields and the values are primitives or other Maps (in the
-     * case of objects).
-     *
-     * @param json String JSON input
-     * @return Java object graph of Maps matching JSON input,
-     *         or null if an error occurred.
-     */
-    public static Map toMaps(String json)
-    {
-        try
-        {
-            return jsonToMaps(json);
-        }
-        catch (Exception ignored)
-        {
-            return null;
-        }
-    }
-
-    /**
-     * Convert the passed in JSON string into a Java object graph
-     * that consists solely of Java Maps where the keys are the
-     * fields and the values are primitives or other Maps (in the
-     * case of objects).
-     *
-     * @param json String JSON input
-     * @return Java object graph of Maps matching JSON input,
-     *         or null if an error occurred.
-     * @throws java.io.IOException If an I/O error occurs
-     */
-    public static Map jsonToMaps(String json) throws IOException
-    {
-        ByteArrayInputStream ba = new ByteArrayInputStream(json.getBytes("UTF-8"));
-        JsonReader jr = new JsonReader(ba, true);
-        return (Map) jr.readObject();
     }
 }
