@@ -11,17 +11,21 @@ import java.lang.reflect.Array;
 import java.lang.reflect.Field;
 import java.lang.reflect.Method;
 import java.lang.reflect.Modifier;
+import java.math.BigDecimal;
+import java.math.BigInteger;
 import java.text.DateFormat;
 import java.text.SimpleDateFormat;
 import java.util.Calendar;
 import java.util.Collection;
 import java.util.Date;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.IdentityHashMap;
 import java.util.Iterator;
 import java.util.LinkedHashMap;
 import java.util.LinkedList;
 import java.util.Map;
+import java.util.Set;
 
 /**
  * Output a Java object graph in JSON format.  This code handles cyclic
@@ -75,6 +79,7 @@ public class JsonWriter extends Writer
     private final Map<Object, Long> _objsReferenced = new IdentityHashMap<Object, Long>();
     private static final Map<String, ClassMeta> _classMetaCache = new HashMap<String, ClassMeta>();
     private static Object[] _byteStrings = new Object[256];
+    private static final Set<Class> _prims = new HashSet<Class>();
     private Writer _out;
     private long _identity = 1;
     private boolean _prettyMode = true;
@@ -87,6 +92,15 @@ public class JsonWriter extends Writer
             char[] chars = Integer.toString(i).toCharArray();
             _byteStrings[i + 128] = chars;
         }
+
+        _prims.add(Byte.class);
+        _prims.add(Integer.class);
+        _prims.add(Long.class);
+        _prims.add(Double.class);
+        _prims.add(Character.class);
+        _prims.add(Float.class);
+        _prims.add(Boolean.class);
+        _prims.add(Short.class);
     }
 
     static class ClassMeta extends LinkedHashMap<String, Field>
@@ -209,7 +223,7 @@ public class JsonWriter extends Writer
             _objVisited.put(obj, _identity++);
             final Class clazz = obj.getClass();
 
-            if (isPrimitiveWrapper(clazz))
+            if (isPrimitiveWrapper(clazz) || clazz.equals(String.class) || clazz.equals(Class.class))
             {   // Can't reference anything
                 continue;
             }
@@ -217,17 +231,13 @@ public class JsonWriter extends Writer
             if (clazz.isArray())
             {
                 Class compType = clazz.getComponentType();
-                if (!isPrimitiveWrapper(compType))
-                {   // Speed up: do not traceReferences "primitive" array types - they cannot reference objects, other than immutables.
+                if (!compType.isPrimitive())
+                {   // Speed up: do not trace references of primitive array types - they cannot reference objects, other than immutables.
                     int len = Array.getLength(obj);
 
                     for (int i = 0; i < len; i++)
                     {
-                        Object o = Array.get(obj, i);
-                        if (o != null)
-                        {   // Slight perf gain (null is legal)
-                            stack.addFirst(o);
-                        }
+                        stack.add(Array.get(obj, i));
                     }
                 }
             }
@@ -247,7 +257,7 @@ public class JsonWriter extends Writer
             try
             {
                 if (isPrimitiveWrapper(field.getType()))
-                {    // speed up: primitives cannot reference another object
+                {    // speed up: primitives & primitive wrappers cannot reference another object
                     continue;
                 }
 
@@ -266,14 +276,13 @@ public class JsonWriter extends Writer
         if (_objVisited.containsKey(obj))
         {    // Only write (define) an object once in the JSON stream, otherwise emit a @ref
             _out.write("{\"@ref\":");
-            Object id = getId(obj);
+            String id = getId(obj);
             if (id == null)
-            {   // TODO: remove this if once it is determine how this can happen.  Currently suspect
-                // Weak / Soft references causing this (graph changes between trace and write).
+            {   // TODO: remove this if once it is determined this can never happen
                 _out.write("0}");
                 return true;
             }
-            _out.write(getId(obj));
+            _out.write(id);
             _out.write('}');
             return true;
         }
@@ -298,7 +307,7 @@ public class JsonWriter extends Writer
         else
         {
             if (_prettyMode)
-            {   // Special Handling for Collection's and Maps to make output smaller, easier to read.
+            {   // Optional [default] special handling for Collection's and Maps to make output smaller, easier to read.
                 if (obj instanceof Collection)
                 {
                     writeCollection((Collection) obj, showType);
@@ -381,6 +390,37 @@ public class JsonWriter extends Writer
         _out.write('"');
     }
 
+    private void writeIdAndType(Object col, boolean showType, boolean referenced) throws IOException
+    {
+        if (showType || referenced)
+        {
+            if (referenced)
+            {
+                String id = getId(col);
+                if (id == null)
+                {   // TODO: Remove this check if we determine this can never happen
+                    writeId("0");
+                }
+                else
+                {
+                    writeId(id);
+                }
+            }
+
+            if (showType)
+            {
+                if (referenced)
+                {
+                    _out.write(",");
+                }
+                writeType(col);
+            }
+        }
+    }
+
+    /**
+     * Specialized output for 'Class' to make it easy to read and create.
+     */
     private void writeClass(Object obj, boolean showType) throws IOException
     {
         String value = ((Class) obj).getName();
@@ -398,24 +438,31 @@ public class JsonWriter extends Writer
         }
     }
 
-    private void writeCalendar(Object obj, boolean showType) throws IOException
+    /**
+     * Specialized output for certain classes to make them easy to read and create.
+     */
+    private void writeSpecial(Object obj, boolean showType, String value) throws IOException
     {
-        Calendar cal = (Calendar) obj;
-        _dateFormat.setTimeZone(cal.getTimeZone());
-        String date = _dateFormat.format(cal.getTime());
+        boolean referenced = _objsReferenced.containsKey(obj);
+        boolean hasHeader = showType | referenced;
 
-        if (showType)
+        if (hasHeader)
         {
             _out.write('{');
-            writeType(obj);
+        }
+
+        writeIdAndType(obj, showType, referenced);
+
+        if (hasHeader)
+        {
             _out.write(",\"value\":\"");
-            _out.write(date);
+            _out.write(value);
             _out.write("\"}");
         }
         else
         {
             _out.write('"');
-            _out.write(date);
+            _out.write(value);
             _out.write('"');
         }
     }
@@ -466,26 +513,22 @@ public class JsonWriter extends Writer
         boolean referenced = _objsReferenced.containsKey(array);
         boolean typeWritten = showType && !Object[].class.equals(arrayType);
 
-        if (typeWritten || referenced)
+        boolean hasHeader = typeWritten | referenced;
+        if (hasHeader)
         {
             _out.write('{');
         }
 
-        if (referenced)
-        {
-            writeId(getId(array));
-            _out.write(',');
-        }
+        writeIdAndType(array, typeWritten, referenced);
 
-        if (typeWritten)
+        if (hasHeader)
         {
-            writeType(array);
             _out.write(',');
         }
 
         if (len == 0)
         {
-            if (typeWritten || referenced)
+            if (hasHeader)
             {
                 _out.write("\"@items\":[]}");
             }
@@ -496,7 +539,7 @@ public class JsonWriter extends Writer
             return;
         }
 
-        if (typeWritten || referenced)
+        if (hasHeader)
         {
             _out.write("\"@items\":[");
         }
@@ -577,23 +620,7 @@ public class JsonWriter extends Writer
                 }
                 else if (isObjectArray)
                 {
-                    if (value instanceof String)
-                    {
-                        writeJsonUtf8String((String) value);
-                    }
-                    else if (value instanceof Date)
-                    {
-                        writeDate(value, true);
-                    }
-                    else if (value instanceof Calendar)
-                    {
-                        writeCalendar(value, true);
-                    }
-                    else if (value instanceof Class)
-                    {
-                        writeClass(value, true);
-                    }
-                    else if (value instanceof Boolean || value instanceof Long || value instanceof Double)
+                    if (value instanceof Boolean || value instanceof Long || value instanceof Double)
                     {   // These types can be inferred - true | false, long integer number (- or digits), or double precision floating point (., e)
                         writePrimitive(value);
                     }
@@ -605,7 +632,7 @@ public class JsonWriter extends Writer
                 else
                 {   // Specific Class-type arrays - only force type when
                     // the instance is derived from array base class.
-                    boolean forceType = !value.getClass().equals(componentClass);
+                    boolean forceType = value.getClass() != componentClass;
                     writeImpl(value, forceType);
                 }
 
@@ -702,22 +729,7 @@ public class JsonWriter extends Writer
         boolean referenced = _objsReferenced.containsKey(col);
 
         _out.write("{");
-        if (showType || referenced)
-        {
-            if (referenced)
-            {
-                writeId(getId(col));
-            }
-
-            if (showType)
-            {
-                if (referenced)
-                {
-                    _out.write(",");
-                }
-                writeType(col);
-            }
-        }
+        writeIdAndType(col, showType, referenced);
 
         int len = col.size();
 
@@ -758,22 +770,7 @@ public class JsonWriter extends Writer
         boolean referenced = _objsReferenced.containsKey(map);
 
         _out.write("{");
-        if (showType || referenced)
-        {
-            if (referenced)
-            {
-                writeId(getId(map));
-            }
-
-            if (showType)
-            {
-                if (referenced)
-                {
-                    _out.write(",");
-                }
-                writeType(map);
-            }
-        }
+        writeIdAndType(map, showType, referenced);
 
         if (map.isEmpty())
         {
@@ -856,14 +853,9 @@ public class JsonWriter extends Writer
             writeJsonUtf8String((String) obj);
             return;
         }
-        else if (obj instanceof Date)
+        else if (obj.getClass().equals(Date.class))
         {
             writeDate(obj, showType);
-            return;
-        }
-        else if (obj instanceof Calendar)
-        {
-            writeCalendar(obj, showType);
             return;
         }
         else if (obj instanceof Class)
@@ -874,6 +866,30 @@ public class JsonWriter extends Writer
 
         if (writeOptionalReference(obj))
         {
+            return;
+        }
+
+        if (obj instanceof  Calendar)
+        {
+            Calendar cal = (Calendar) obj;
+            _dateFormat.setTimeZone(cal.getTimeZone());
+            String date = _dateFormat.format(cal.getTime());
+            writeSpecial(obj, showType, date);
+            return;
+        }
+        else if (obj instanceof BigDecimal)
+        {
+            writeSpecial(obj, showType, ((BigDecimal) obj).toPlainString());
+            return;
+        }
+        else if (obj instanceof BigInteger)
+        {
+            writeSpecial(obj, showType, obj.toString());
+            return;
+        }
+        else if (obj instanceof java.sql.Date)
+        {
+            writeSpecial(obj, showType, obj.toString());
             return;
         }
 
@@ -912,6 +928,11 @@ public class JsonWriter extends Writer
         {
             for (Field field : classInfo.values())
             {
+                if (_prettyMode && (field.getModifiers() & Modifier.TRANSIENT) != 0)
+                {   // Skip transient fields when in 'prettyMode'
+                    continue;
+                }
+
                 if (first)
                 {
                     first = false;
@@ -943,25 +964,8 @@ public class JsonWriter extends Writer
                 Class type = field.getType();
                 boolean forceType = o.getClass() != type;     // If types are not exactly the same, write "@type" field
 
-                if (o instanceof String)
+                if (isPrimitiveWrapper(type))
                 {
-                    writeJsonUtf8String((String) o);
-                }
-                else if (o instanceof Date)
-                {
-                    writeDate(o, forceType);
-                }
-                else if (o instanceof Calendar)
-                {
-                    writeCalendar(o, forceType);
-                }
-                else if (o instanceof Class)
-                {
-                    writeClass(o, forceType);
-                }
-                else if (isPrimitiveWrapper(type))
-                {   // This 'if' statement must be after String, Date, and Class check because isPrimitiveWrapper considers
-                    // them primitives.  However, they must be handled individually, so they are handled above.
                     writePrimitive(o);
                 }
                 else
@@ -988,7 +992,7 @@ public class JsonWriter extends Writer
 
     private static boolean isPrimitiveWrapper(Class c)
     {
-        return c.isPrimitive() || JsonReader._prims.contains(c);
+        return c.isPrimitive() || _prims.contains(c);
     }
 
     /**

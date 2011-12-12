@@ -12,6 +12,8 @@ import java.io.ObjectOutputStream;
 import java.io.Serializable;
 import java.io.UnsupportedEncodingException;
 import java.io.Writer;
+import java.math.BigDecimal;
+import java.math.BigInteger;
 import java.util.ArrayList;
 import java.util.Calendar;
 import java.util.Collection;
@@ -54,7 +56,7 @@ public class TestJsonReaderWriter extends TestCase
     public static class TestObject implements Comparable, Serializable
     {
         protected String _name;
-        private TestObject _other;
+        private Object _other;
 
         public TestObject(String name)
         {
@@ -1493,10 +1495,10 @@ public class TestJsonReaderWriter extends TestCase
         assertNull(root._sb_c);
 
         assertTrue(root._cycleTest._name.equals("A"));
-        assertTrue(root._cycleTest._other._name.equals("B"));
-        assertTrue(root._cycleTest._other._other._name.equals("C"));
-        assertTrue(root._cycleTest._other._other._other._name.equals("A"));
-        assertTrue(root._cycleTest == root._cycleTest._other._other._other);
+        assertTrue(((TestObject) root._cycleTest._other)._name.equals("B"));
+        assertTrue(((TestObject)((TestObject) root._cycleTest._other)._other)._name.equals("C"));
+        assertTrue(((TestObject) ((TestObject) ((TestObject) root._cycleTest._other)._other)._other)._name.equals("A"));
+        assertTrue(root._cycleTest == ((TestObject)((TestObject)root._cycleTest._other)._other)._other);
 
         assertTrue(root._arrayList_empty.isEmpty());
         System.out.println("root._arrayList_1.size() = " + root._arrayList_1.size());
@@ -1618,6 +1620,84 @@ public class TestJsonReaderWriter extends TestCase
         assertTrue(root._big == '\ufbfc');
 
         time(root);
+    }
+
+    public void testReferences2() throws Exception
+    {
+        println("\nTestJsonReaderWriter.testReferences2()");
+        Integer i = new Integer(16);
+        Object[] a = new Object[] {i,i};
+        String json = getJsonString(a);
+        println("json = " + json);
+        JsonReader jr = new JsonReader(convertStringToInputStream(json));
+        a = (Object[]) readJsonObject(jr);
+        assertTrue(a[0].equals(16));
+        assertTrue(a[0] == a[1]);
+
+        i = new Integer(1234567);
+        Integer[] aa = new Integer[] {i, i};
+        json = getJsonString(aa);
+        println("json = " + json);
+        jr = new JsonReader(convertStringToInputStream(json));
+        a = (Object[]) readJsonObject(jr);
+        assertTrue(a[0].equals(1234567));
+        assertTrue(a[0] != a[1]);       // outside cache range
+
+        Date d = new Date();
+        a = new Object[] {d, d};
+        json = getJsonString(a);
+        println("json = " + json);
+        jr = new JsonReader(convertStringToInputStream(json));
+        a = (Object[]) readJsonObject(jr);
+        assertTrue(a[0].equals(d));
+        assertTrue(a[0] != a[1]);
+
+        Class  c = Rectangle.class;
+        a = new Object[] {c, c};
+        json = getJsonString(a);
+        println("json = " + json);
+        jr = new JsonReader(convertStringToInputStream(json));
+        a = (Object[]) readJsonObject(jr);
+        assertTrue(a[0].equals(c));
+        assertTrue(a[0] == a[1]);
+
+        Calendar cal = Calendar.getInstance();
+        a = new Object[] {cal, cal};
+        json = getJsonString(a);
+        println("json = " + json);
+        jr = new JsonReader(convertStringToInputStream(json));
+        a = (Object[]) readJsonObject(jr);
+        assertTrue(((Calendar) a[0]).getTime().getTime() == cal.getTime().getTime());
+        assertTrue(a[0] == a[1]);
+
+        String pi = "3.1415926535897932384626433";
+        BigDecimal big = new BigDecimal(pi);
+        a = new Object[] {big, big};
+        json = getJsonString(a);
+        println("json = " + json);
+        jr = new JsonReader(convertStringToInputStream(json));
+        a = (Object[]) readJsonObject(jr);
+        assertTrue(a[0].equals(new BigDecimal(pi)));
+        assertTrue(a[0] == a[1]);
+
+        String bigNum = "123456789012345678901234567890";
+        BigInteger bigInt = new BigInteger(bigNum);
+        a = new Object[] {bigInt, bigInt};
+        json = getJsonString(a);
+        println("json = " + json);
+        jr = new JsonReader(convertStringToInputStream(json));
+        a = (Object[]) readJsonObject(jr);
+        assertTrue(a[0].equals(new BigInteger(bigNum)));
+        assertTrue(a[0] == a[1]);
+
+        java.sql.Date sqlDate = java.sql.Date.valueOf("2011-12-02");
+        a = new Object[] {sqlDate, sqlDate};
+        json = getJsonString(a);
+        println("json = " + json);
+        jr = new JsonReader(convertStringToInputStream(json));
+        a = (Object[]) readJsonObject(jr);
+        assertTrue(a[0].equals(java.sql.Date.valueOf("2011-12-02")));
+        assertTrue(a[0] == a[1]);
     }
 
     public void testPerformance() throws Exception
@@ -2850,8 +2930,7 @@ public class TestJsonReaderWriter extends TestCase
         greg.set(1965, 11, 17, 14, 30, 16);
         String tz = greg.getTimeZone().getDisplayName();
         String json = getJsonString(greg);
-        println("json = " + json);
-
+        System.out.println("json = " + json);
         JsonReader jr = new JsonReader(convertStringToInputStream(json));
         Calendar cal = (Calendar) readJsonObject(jr);
         assertTrue(cal.getClass().equals(GregorianCalendar.class));
@@ -2865,15 +2944,16 @@ public class TestJsonReaderWriter extends TestCase
         greg.set(2011, 11, 8, 13, 29, 48);
         tz = greg.getTimeZone().getDisplayName();
         json = getJsonString(greg);
-
-        Calendar[] cals = new Calendar[] { greg } ;
+        Calendar[] cals = new Calendar[] { greg, greg } ;
         json = getJsonString(cals);
+        System.out.println("json = " + json);
         jr = new JsonReader(convertStringToInputStream(json));
         cals = (Calendar[]) readJsonObject(jr);
         assertTrue(cals[0].getClass().equals(GregorianCalendar.class));
         assertTrue(cals[0].getTimeZone().getDisplayName().equals(tz));
         assertTrue(greg.getTime().equals(cals[0].getTime()));
-        println("json = " + json);
+        assertTrue(cals[0] == cals[1]);
+        time(cals);
 
         TestCalendar testCal = new TestCalendar();
         testCal._cal = cal;
@@ -2891,10 +2971,28 @@ public class TestJsonReaderWriter extends TestCase
         jr = new JsonReader(convertStringToInputStream("{\"@type\":\"java.util.GregorianCalendar\",\"value\":\"1965-12-17T14:30:16.623-0000\"}"));
         Calendar utcCal = (Calendar) readJsonObject(jr);
         assertTrue(estCal.getTime().equals(utcCal.getTime()));
+
+        List list = new ArrayList();
+        list.add(greg);
+        list.add(cal);
+        json = getJsonString(list);
+        jr = new JsonReader(convertStringToInputStream(json));
+        list = (List) readJsonObject(jr);
+        assertTrue(greg.equals(list.get(0)));
+        assertTrue(cal.equals(list.get(1)));
+
+        TestObject foo = new TestObject("cal test");
+        foo._other = greg;
+        json = getJsonString(foo);
+        jr = new JsonReader(convertStringToInputStream(json));
+        foo = (TestObject) readJsonObject(jr);
+        assertTrue(foo._other.equals(greg));
+        assertTrue(foo._other != greg);
     }
 
     public void testForwardRefs() throws Exception
     {
+        println("\nTestJsonReaderWriter.testForwardRefs()");
         TestObject one = new TestObject("One");
         TestObject two = new TestObject("Two");
         one._other = two;
@@ -2936,7 +3034,102 @@ public class TestJsonReaderWriter extends TestCase
         assertTrue((Integer)map.get(3L) == 4);
         assertTrue((Integer)map.get(4L) == 5);
     }
-    
+
+    public static class TestTransient
+    {
+        public String _name;
+        public transient String _code;
+    }
+
+    public void testTransient() throws Exception
+    {
+        println("\nTestJsonReaderWriter.testTransient()");
+        boolean save = _prettyMode;
+        _prettyMode = true;
+        TestTransient t = new TestTransient();
+        t._name = "Json-io";
+        t._code = "byteCode";
+        String json = getJsonString(t);
+        JsonReader jr = new JsonReader(convertStringToInputStream(json));
+        t = (TestTransient) readJsonObject(jr);
+
+        assertTrue("Json-io".equals(t._name));
+        assertTrue(t._code == null);
+        _prettyMode = save;
+    }
+
+    public void testBigDecimal() throws Exception
+    {
+        println("\nTestJsonReaderWriter.testBigDecimal()");
+        TestObject big = new TestObject("big");
+        String longNum ="123456789.12345678901234567890123456789";
+        big._other = new BigDecimal(longNum);
+        String json = getJsonString(big);
+        println("json = " + json);
+        JsonReader jr = new JsonReader(convertStringToInputStream(json));
+        big = (TestObject) readJsonObject(jr);
+        String val = ((BigDecimal)big._other).toPlainString();
+        assertTrue(val.equals(longNum));
+
+        String pi = "3.1415926535897932384626433";
+        BigDecimal[] decs = new BigDecimal[] { (BigDecimal) big._other, new BigDecimal(pi)};
+        json = getJsonString(decs);
+        System.out.println("json = " + json);
+        jr = new JsonReader(convertStringToInputStream(json));
+        decs = (BigDecimal[]) readJsonObject(jr);
+        assertTrue(decs.length == 2);
+        assertTrue(decs[0].equals(new BigDecimal(longNum)));
+        assertTrue(decs[1].equals(new BigDecimal(pi)));
+    }
+
+    public void testBigInteger() throws Exception
+    {
+        println("\nTestJsonReaderWriter.testBigInteger()");
+        TestObject big = new TestObject("big");
+        String longNum ="1234567890123456789012345678901234567890";
+        big._other = new BigInteger(longNum);
+        String json = getJsonString(big);
+        println("json = " + json);
+        JsonReader jr = new JsonReader(convertStringToInputStream(json));
+        big = (TestObject) readJsonObject(jr);
+        String val = big._other.toString();
+        assertTrue(val.equals(longNum));
+
+        String pi = "31415926535897932384626433";
+        BigInteger[] ints = new BigInteger[] { (BigInteger) big._other, new BigInteger(pi)};
+        json = getJsonString(ints);
+        System.out.println("json = " + json);
+        jr = new JsonReader(convertStringToInputStream(json));
+        ints = (BigInteger[]) readJsonObject(jr);
+        assertTrue(ints.length == 2);
+        assertTrue(ints[0].equals(new BigInteger(longNum)));
+        assertTrue(ints[1].equals(new BigInteger(pi)));
+    }
+
+    public void testSqlDate() throws Exception
+    {
+        println("\nTestSqlDate.testBigInteger()");
+        TestObject big = new TestObject("SqlDate");
+        String date ="1964-06-10";
+        big._other = java.sql.Date.valueOf(date);
+        String json = getJsonString(big);
+        println("json = " + json);
+        JsonReader jr = new JsonReader(convertStringToInputStream(json));
+        big = (TestObject) readJsonObject(jr);
+        String val = big._other.toString();
+        assertTrue(val.equals(date));
+
+        String date2 = "1935-11-17";
+        java.sql.Date[] dates = new java.sql.Date[] { (java.sql.Date) big._other, java.sql.Date.valueOf(date2)};
+        json = getJsonString(dates);
+        System.out.println("json = " + json);
+        jr = new JsonReader(convertStringToInputStream(json));
+        dates = (java.sql.Date[]) readJsonObject(jr);
+        assertTrue(dates.length == 2);
+        assertTrue(dates[0].equals(java.sql.Date.valueOf(date)));
+        assertTrue(dates[1].equals(java.sql.Date.valueOf(date2)));
+    }
+
     private static void println(Object ... args)
     {
         if (_debug)

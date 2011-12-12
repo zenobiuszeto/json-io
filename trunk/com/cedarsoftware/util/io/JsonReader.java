@@ -12,6 +12,8 @@ import java.lang.reflect.Array;
 import java.lang.reflect.Constructor;
 import java.lang.reflect.Field;
 import java.lang.reflect.InvocationTargetException;
+import java.math.BigDecimal;
+import java.math.BigInteger;
 import java.text.SimpleDateFormat;
 import java.util.ArrayList;
 import java.util.Calendar;
@@ -78,7 +80,7 @@ public class JsonReader extends Reader
     private static final Character[] _charCache = new Character[128];
     private static final Byte[] _byteCache = new Byte[256];
     private static final Map<String, String> _stringCache = new HashMap<String, String>();
-    static final Set<Class> _prims = new HashSet<Class>();
+    private static final Set<Class> _prims = new HashSet<Class>();
     private static final Map<Class, Constructor> _constructors = new HashMap<Class, Constructor>();
     private static final Map<String, Class> _nameToClass = new HashMap<String, Class>();
     private final Map<Object, JsonObject> _objsRead = new IdentityHashMap<Object, JsonObject>();
@@ -1412,7 +1414,9 @@ public class JsonReader extends Reader
 
     private static boolean isPrimitive(Class c)
     {
-        return c.isPrimitive() || _prims.contains(c) || Calendar.class.isAssignableFrom(c);
+        return c.isPrimitive() || _prims.contains(c) ||
+                Calendar.class.isAssignableFrom(c) || BigDecimal.class.isAssignableFrom(c) ||
+                BigInteger.class.isAssignableFrom(c) || java.sql.Date.class.isAssignableFrom(c);
     }
 
     private Object newPrimitiveWrapper(Class c, Object rhs) throws IOException
@@ -1490,6 +1494,18 @@ public class JsonReader extends Reader
             {
                 throw new IOException("Failed to parse date: " + rhs);
             }
+        }
+        else if (BigDecimal.class.isAssignableFrom(c))
+        {
+            return new BigDecimal((String) rhs);
+        }
+        else if (BigInteger.class.isAssignableFrom(c))
+        {
+            return new BigInteger((String)rhs);
+        }
+        else if (java.sql.Date.class.isAssignableFrom(c))
+        {
+            return java.sql.Date.valueOf((String)rhs);
         }
 
         throw new IOException("Class '" + c.getName() + "' requested for special instantiation.");
