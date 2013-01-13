@@ -1229,7 +1229,7 @@ public class JsonReader implements Closeable
                 field.set(target, null);
             }
             else if (rhs == EMPTY_OBJECT)
-            {            	
+            {
                 field.set(target, newInstance(fieldType));
             }
             else if ((special = readIfMatching(rhs, field.getType(), stack)) != null)
@@ -1351,9 +1351,9 @@ public class JsonReader implements Closeable
                 {
                     mate = Enum.valueOf(c.getSuperclass(), (String)jsonObj.get("name"));
                 }
-                else if ("java.util.Arrays$ArrayList".equals(c.getName()))                	
+                else if ("java.util.Arrays$ArrayList".equals(c.getName()))
                 {	// Special case: Arrays$ArrayList does not allow .add() to be called on it.
-                	mate = new ArrayList();
+                    mate = new ArrayList();
                 }
                 else
                 {
@@ -1380,9 +1380,9 @@ public class JsonReader implements Closeable
             {
                 mate = Enum.valueOf(clazz.getSuperclass(), (String)jsonObj.get("name"));
             }
-            else if ("java.util.Arrays$ArrayList".equals(clazz.getName()))                	
+            else if ("java.util.Arrays$ArrayList".equals(clazz.getName()))
             {	// Special case: Arrays$ArrayList does not allow .add() to be called on it.
-            	mate = new ArrayList();
+                mate = new ArrayList();
             }
             else
             {
@@ -2015,7 +2015,7 @@ public class JsonReader implements Closeable
         try
         {
             Class c = _nameToClass.get(name);
-            return (c != null) ? c : Class.forName(name);
+            return c == null ? loadClass(name) : c;
         }
         catch (ClassNotFoundException e)
         {
@@ -2032,12 +2032,52 @@ public class JsonReader implements Closeable
         try
         {
             Class c = _nameToClass.get(name);
-            return (c != null) ? c : Class.forName(name);
+            return c == null ? loadClass(name) : c;
         }
         catch (ClassNotFoundException e)
         {
             throw new IOException("Class instance '" + name + "' could not be created.");
         }
+    }
+
+    // loadClass() provided by: Thomas Margreiter
+    private static Class loadClass(String name) throws ClassNotFoundException
+    {
+        String className = name;
+        boolean arrayType = false;
+        Class primitiveArray = null;
+
+        while (className.startsWith("["))
+        {
+            arrayType = true;
+            if (className.endsWith(";")) className = className.substring(0,className.length()-1);
+            if (className.equals("[B")) primitiveArray = byte[].class;
+            if (className.equals("[S")) primitiveArray = short[].class;
+            if (className.equals("[I")) primitiveArray = int[].class;
+            if (className.equals("[J")) primitiveArray = long[].class;
+            if (className.equals("[F")) primitiveArray = float[].class;
+            if (className.equals("[D")) primitiveArray = double[].class;
+            if (className.equals("[Z")) primitiveArray = boolean[].class;
+            if (className.equals("[C")) primitiveArray = char[].class;
+            int startpos = className.startsWith("[L") ? 2 : 1;
+            className = className.substring(startpos);
+        }
+        Class currentClass = null;
+        if (null == primitiveArray)
+        {
+            currentClass = Thread.currentThread().getContextClassLoader().loadClass(className);
+        }
+
+        if (arrayType)
+        {
+            currentClass = (null != primitiveArray) ? primitiveArray : Array.newInstance(currentClass, 0).getClass();
+            while (name.startsWith("[["))
+            {
+                currentClass=Array.newInstance(currentClass, 0).getClass();
+                name = name.substring(1);
+            }
+        }
+        return currentClass;
     }
 
     /**

@@ -4922,6 +4922,75 @@ public class TestJsonReaderWriter extends TestCase
     	Map map2 = (Map) JsonReader.jsonToJava(json);
     	assertTrue(map.equals(map2));
     }
+
+    public void testMultiDimensionalArrays() throws Exception
+    {
+        int[][][][] x = new int[][][][]{{{{0,1},{0,1}},{{0,1},{0,1}}},{{{0,1},{0,1}},{{0,1},{0,1}}}};
+        for (int a=0; a < 2; a++)
+        {
+            for (int b=0; b < 2; b++)
+            {
+                for (int c=0; c < 2; c++)
+                {
+                    for (int d=0; d < 2; d++)
+                    {
+                        x[a][b][c][d] = a + b + c + d;
+                    }
+                }
+            }
+        }
+
+        String json = JsonWriter.objectToJson(x);
+        int[][][][] y = (int[][][][]) JsonReader.jsonToJava(json);
+
+
+        for (int a=0; a < 2; a++)
+        {
+            for (int b=0; b < 2; b++)
+            {
+                for (int c=0; c < 2; c++)
+                {
+                    for (int d=0; d < 2; d++)
+                    {
+                        assertTrue(y[a][b][c][d] == a + b + c + d);
+                    }
+                }
+            }
+        }
+
+        Integer[][][][] xx = new Integer[][][][]{{{{0,1},{0,1}},{{0,1},{0,1}}},{{{0,1},{0,1}},{{0,1},{0,1}}}};
+        for (int a=0; a < 2; a++)
+        {
+            for (int b=0; b < 2; b++)
+            {
+                for (int c=0; c < 2; c++)
+                {
+                    for (int d=0; d < 2; d++)
+                    {
+                        xx[a][b][c][d] = a + b + c + d;
+                    }
+                }
+            }
+        }
+
+        json = JsonWriter.objectToJson(xx);
+        Integer[][][][] yy = (Integer[][][][]) JsonReader.jsonToJava(json);
+
+
+        for (int a=0; a < 2; a++)
+        {
+            for (int b=0; b < 2; b++)
+            {
+                for (int c=0; c < 2; c++)
+                {
+                    for (int d=0; d < 2; d++)
+                    {
+                        assertTrue(yy[a][b][c][d] == a + b + c + d);
+                    }
+                }
+            }
+        }
+    }
 	        
     private static void println(Object ... args)
     {
