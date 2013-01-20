@@ -4811,44 +4811,24 @@ public class TestJsonReaderWriter extends TestCase
         println("json0=" + json0);
 
         Map map = JsonReader.jsonToMaps(json0);
-        assertTrue(map.get("_byte") instanceof Byte);
-        assertTrue(map.get("_short") instanceof Short);
-        assertTrue(map.get("_int") instanceof Integer);
-        assertTrue(map.get("_long") instanceof Long);
-        assertTrue(map.get("_float") instanceof Float);
-        assertTrue(map.get("_double") instanceof Double);
-        assertTrue(map.get("_boolean") instanceof Boolean);
-        assertTrue(map.get("_char") instanceof Character);
-        assertTrue(map.get("_bigD") instanceof BigDecimal);
+        assertTrue((Byte)map.get("_byte") == 1);
+        assertTrue((Short) map.get("_short") == 2);
+        assertTrue((Integer) map.get("_int") == 3);
+        assertTrue((Long) map.get("_long") == 4);
+        assertTrue((Float) map.get("_float") == 5.0f);
+        assertTrue((Double) map.get("_double") == 6.0);
+        assertTrue(map.get("_boolean") == Boolean.TRUE);
+        assertTrue((Character) map.get("_char") == 'J');
 
-        Map prim = (Map) map.get("_Byte");
-        assertTrue(prim.get("value") instanceof Byte);
-        assertTrue(prim.get("value").equals((byte)11));
-        prim = (Map) map.get("_Short");
-        assertTrue(prim.get("value") instanceof Short);
-        assertTrue(prim.get("value").equals((short)22));
-        prim = (Map) map.get("_Integer");
-        assertTrue(prim.get("value") instanceof Integer);
-        assertTrue(prim.get("value").equals(33));
-        prim = (Map) map.get("_Long");
-        assertTrue(prim.get("value") instanceof Long);
-        assertTrue(prim.get("value").equals(44L));
-        prim = (Map) map.get("_Float");
-        assertTrue(prim.get("value") instanceof Float);
-        assertTrue(prim.get("value").equals(55.0f));
-        prim = (Map) map.get("_Double");
-        assertTrue(prim.get("value") instanceof Double);
-        assertTrue(prim.get("value").equals(66.0));
-        prim = (Map) map.get("_Boolean");
-        assertTrue(prim.get("value") instanceof Boolean);
-        assertTrue(prim.get("value").equals(true));
-        prim = (Map) map.get("_Char");
-        assertTrue(prim.get("value") instanceof Character);
-        assertTrue(prim.get("value").equals('K'));
-
-        BigDecimal d = (BigDecimal) map.get("_bigD");
-        assertTrue(d instanceof BigDecimal);
-        assertTrue(d.equals(new BigDecimal(2.71828)));
+        assertTrue((Byte) map.get("_Byte") == 11);
+        assertTrue((Short) map.get("_Short") == 22);
+        assertTrue((Integer) map.get("_Integer") == 33);
+        assertTrue((Long) map.get("_Long") == 44L);
+        assertTrue((Float) map.get("_Float") == 55.0f);
+        assertTrue((Double) map.get("_Double") == 66.0);
+        assertTrue((Boolean) map.get("_Boolean") == Boolean.TRUE);
+        assertTrue((Character) map.get("_Char") == 'K');
+        assertTrue(map.get("_bigD").equals(new BigDecimal(2.71828)));
 
         String json1 = JsonWriter.objectToJson(map);
         println("json1=" + json1);
@@ -4990,6 +4970,40 @@ public class TestJsonReaderWriter extends TestCase
                 }
             }
         }
+    }
+
+    static class MyBooleanTesting
+    {
+        private boolean myBoolean=false;
+    }
+
+    static class MyBoolean2Testing
+    {
+        private Boolean myBoolean=false;
+    }
+
+    public void testBooleanCompatibility() throws IOException
+    {
+        MyBooleanTesting testObject = new MyBooleanTesting();
+        MyBoolean2Testing testObject2 = new MyBoolean2Testing();
+        String json0 = JsonWriter.objectToJson(testObject);
+        String json1 = JsonWriter.objectToJson(testObject2);
+
+        println("json0=" + json0);
+        println("json1=" + json1);
+
+        assertTrue(json0.contains("\"myBoolean\":false"));
+        assertTrue(json1.contains("\"myBoolean\":false"));
+    }
+
+    public void testMapToMapCompatibility() throws Exception
+    {
+        String json0 = "{\"rows\":[{\"columns\":[{\"name\":\"ZYKLUS\",\"value\":\"9000\"},{\"name\":\"VON\",\"value\":\"0001-01-01\"},{\"name\":\"BIS\",\"value\":\"0001-01-01\"}]},{\"columns\":[{\"name\":\"ZYKLUS\",\"value\":\"9713\"},{\"name\":\"VON\",\"value\":\"0001-01-01\"},{\"name\":\"BIS\",\"value\":\"0001-01-01\"}]}],\"selectedRows\":\"110\"}";
+        Map map = JsonReader.jsonToMaps(json0);
+        String json1 = JsonWriter.objectToJson(map);
+        println("json0=" + json0);
+        println("json1=" + json1);
+        assertTrue(json0.equals(json1));
     }
 	        
     private static void println(Object ... args)
