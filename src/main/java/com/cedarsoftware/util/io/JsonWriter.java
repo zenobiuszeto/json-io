@@ -1509,7 +1509,7 @@ public class JsonWriter implements Closeable, Flushable
             {
                 o = field.get(obj);
             }
-            catch (Exception e)
+            catch (Exception ignored)
             {
                 o = null;
             }
@@ -1523,7 +1523,7 @@ public class JsonWriter implements Closeable, Flushable
             Class type = field.getType();
             boolean forceType = o.getClass() != type;     // If types are not exactly the same, write "@type" field
 
-            if (type.isPrimitive())
+            if (JsonReader.isPrimitive(type))
             {
                 writePrimitive(o);
             }
