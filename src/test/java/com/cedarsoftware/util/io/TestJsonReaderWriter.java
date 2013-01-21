@@ -3316,7 +3316,7 @@ public class TestJsonReaderWriter extends TestCase
         list2 = (List) JsonReader.toJava(json);
         assertTrue(list2.size() == 3);
         assertTrue(list2.get(0).equals("a"));
-        assertTrue(list2.get(1).getClass().equals(Object.class));
+        assertTrue(list2.get(1).getClass().equals(JsonObject.class));
         assertTrue(list2.get(2).equals("b"));
     }
 
@@ -4144,7 +4144,7 @@ public class TestJsonReaderWriter extends TestCase
         println("\nTestJsonReaderWriter.testEmptyObject()");
 
         Object o = JsonReader.jsonToJava("{}");
-        assertTrue(Object.class.equals(o.getClass()));
+        assertTrue(JsonObject.class.equals(o.getClass()));
 
         Object[] oa = (Object[]) JsonReader.jsonToJava("[{},{}]");
         assertTrue(oa.length == 2);
@@ -4972,18 +4972,18 @@ public class TestJsonReaderWriter extends TestCase
         }
     }
 
-    static class MyBooleanTesting
-    {
-        private boolean myBoolean=false;
-    }
-
-    static class MyBoolean2Testing
-    {
-        private Boolean myBoolean=false;
-    }
-
     public void testBooleanCompatibility() throws IOException
     {
+        class MyBooleanTesting
+        {
+            private boolean myBoolean = false;
+        }
+
+        class MyBoolean2Testing
+        {
+            private Boolean myBoolean = false;
+        }
+
         MyBooleanTesting testObject = new MyBooleanTesting();
         MyBoolean2Testing testObject2 = new MyBoolean2Testing();
         String json0 = JsonWriter.objectToJson(testObject);
@@ -4999,13 +4999,43 @@ public class TestJsonReaderWriter extends TestCase
     public void testMapToMapCompatibility() throws Exception
     {
         String json0 = "{\"rows\":[{\"columns\":[{\"name\":\"ZYKLUS\",\"value\":\"9000\"},{\"name\":\"VON\",\"value\":\"0001-01-01\"},{\"name\":\"BIS\",\"value\":\"0001-01-01\"}]},{\"columns\":[{\"name\":\"ZYKLUS\",\"value\":\"9713\"},{\"name\":\"VON\",\"value\":\"0001-01-01\"},{\"name\":\"BIS\",\"value\":\"0001-01-01\"}]}],\"selectedRows\":\"110\"}";
-        Map map = JsonReader.jsonToMaps(json0);
-        String json1 = JsonWriter.objectToJson(map);
+        JsonObject root = (JsonObject) JsonReader.jsonToMaps(json0);
+        String json1 = JsonWriter.objectToJson(root);
         println("json0=" + json0);
         println("json1=" + json1);
         assertTrue(json0.equals(json1));
     }
-	        
+
+    public void testJsonObjectToJava() throws Exception
+    {
+        TestObject test = new TestObject("T.O.");
+        TestObject child = new TestObject("child");
+        test._other = child;
+        String json = JsonWriter.objectToJson(test);
+        println("json=" + json);
+        JsonObject root = (JsonObject) JsonReader.jsonToMaps(json);
+        JsonReader reader = new JsonReader();
+        TestObject test2 = (TestObject) reader.jsonObjectsToJava(root);
+        assertTrue(test2.equals(test));
+        assertTrue(test2._other.equals(child));
+    }
+
+    public void testInnerInstance() throws Exception
+    {
+        Dog dog = new Dog();
+        dog.x = 10;
+        Dog.Leg leg = dog.new Leg();
+        leg.y = 20;
+        String json0 = JsonWriter.objectToJson(dog);
+        println("json0=" + json0);
+
+        String json1 = JsonWriter.objectToJson(leg);
+        println("json1=" + json1);
+        Dog.Leg go = (Dog.Leg) JsonReader.jsonToJava(json1);
+        assertTrue(go.y == 20);
+        assertTrue(go.getParentX() == 10);
+    }
+
     private static void println(Object ... args)
     {
         if (_debug)
