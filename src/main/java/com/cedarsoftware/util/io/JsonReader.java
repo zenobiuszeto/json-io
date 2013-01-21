@@ -80,7 +80,6 @@ public class JsonReader implements Closeable
     private static final int STATE_READ_POST_VALUE = 3;
     private static final String EMPTY_ARRAY = "~!a~";  // compared with ==
     private static final String EMPTY_OBJECT = "~!o~";  // compared with ==
-    private static final Object EMPTY_OBJECT_INSTANCE = new Object();
     private static final Character[] _charCache = new Character[128];
     private static final Byte[] _byteCache = new Byte[256];
     private static final Map<String, String> _stringCache = new HashMap<String, String>();
@@ -645,6 +644,12 @@ public class JsonReader implements Closeable
         return map;
     }
 
+    public JsonReader()
+    {
+        _noObjects = false;
+        _in = null;
+    }
+
     public JsonReader(InputStream in)
     {
         this(in, false);
@@ -664,7 +669,9 @@ public class JsonReader implements Closeable
     }
 
     /**
-     * Finite State Machine (FSM) used to parse the JSON input.
+     * Finite State Machine (FSM) used to parse the JSON input into
+     * JsonObject's (Maps).  Then, if requested, the JsonObjects are
+     * converted into Java instances.
      *
      * @return Java Object graph constructed from InputStream supplying
      *         JSON serialized content.
@@ -675,22 +682,51 @@ public class JsonReader implements Closeable
         Object o = readJsonObject();
         if (o == EMPTY_OBJECT)
         {
-            return EMPTY_OBJECT_INSTANCE;
+            return new JsonObject();
         }
 
-        createJavaObjectInstance(Object.class, (JsonObject) o);
-        Object graph = convertMapsToObjects((JsonObject<String, Object>) o);
-        patchUnresolvedReferences();
-        rehashMaps();
-        _objsRead.clear();
-        _unresolvedRefs.clear();
-        _prettyMaps.clear();
+        Object graph = convertParsedMapsToJava((JsonObject) o);
 
         // Allow a complete 'Map' return (Javascript style)
         if (_noObjects)
         {
             return o;
         }
+        return graph;
+    }
+
+    /**
+     * Convert a root JsonObject that represents parsed JSON, into
+     * an actual Java object.
+     * @param root JsonObject instance that was the root object from the
+     * JSON input that was parsed in an earlier call to JsonReader.
+     * @return a typed Java instance that was serialized into JSON.
+     */
+    public Object jsonObjectsToJava(JsonObject root) throws IOException
+    {
+        _noObjects = false;
+        return convertParsedMapsToJava(root);
+    }
+
+    /**
+     * This method converts a root Map, (which contains nested Maps
+     * and so forth representing a Java Object graph), to a Java
+     * object instance.  The root map came from using the JsonReader
+     * to parse a JSON graph (using the API that puts the graph
+     * into Maps, not the typed representation).
+     * @param root JsonObject instance that was the root object from the
+     * JSON input that was parsed in an earlier call to JsonReader.
+     * @return a typed Java instance that was serialized into JSON.
+     */
+    private Object convertParsedMapsToJava(JsonObject root) throws IOException
+    {
+        createJavaObjectInstance(Object.class, (JsonObject) root);
+        Object graph = convertMapsToObjects((JsonObject<String, Object>) root);
+        patchUnresolvedReferences();
+        rehashMaps();
+        _objsRead.clear();
+        _unresolvedRefs.clear();
+        _prettyMaps.clear();
         return graph;
     }
 
@@ -975,7 +1011,7 @@ public class JsonReader implements Closeable
             }
             else if (element == EMPTY_OBJECT)
             {   // Handles {}
-                col.add(EMPTY_OBJECT_INSTANCE);
+                col.add(new JsonObject());
             }
             else if ((special = readIfMatching(element, null, stack)) != null)
             {
