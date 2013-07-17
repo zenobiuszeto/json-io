@@ -5036,6 +5036,23 @@ public class TestJsonReaderWriter extends TestCase
         assertTrue(go.getParentX() == 10);
     }
 
+    public void testChangedClass() throws Exception
+    {
+        Dog dog = new Dog();
+        dog.x = 10;
+        Dog.Leg leg = dog.new Leg();
+        leg.y = 20;
+        String json0 = JsonWriter.objectToJson(dog);
+        println("json0=" + json0);
+        JsonObject job = (JsonObject) JsonReader.jsonToMaps(json0);
+        job.put("phantom", new TestObject("Eddie"));
+        String json1 = JsonWriter.objectToJson(job);
+        println("json1=" + json1);
+        assertTrue(json1.contains("phantom"));
+        assertTrue(json1.contains("TestObject"));
+        assertTrue(json1.contains("_other"));
+    }
+
     private static void println(Object ... args)
     {
         if (_debug)
