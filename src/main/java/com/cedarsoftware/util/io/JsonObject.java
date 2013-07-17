@@ -65,6 +65,11 @@ public class JsonObject<K, V> extends LinkedHashMap<K, V>
         return target;
     }
 
+    public void setTarget(Object target)
+    {
+        this.target = target;
+    }
+
     public Class getTargetClass()
     {
         return target.getClass();
