@@ -1349,6 +1349,10 @@ public class JsonWriter implements Closeable, Flushable
         {
             ClassMeta meta = getDeepDeclaredFields(type);
             Field field = meta.get(fieldName);
+            if (field == null)
+            {   // Can happen when the 'same' class is different in two different JVMs.
+                return false;
+            }
             return value.getClass().equals(field.getType());
         }
         return false;
