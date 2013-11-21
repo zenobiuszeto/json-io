@@ -1,1 +1,0 @@
-Git Repositories.  A better source code control system than CVS, SVN, and all others.
