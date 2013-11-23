@@ -11,4 +11,4 @@ When you call the JsonReader.jsonToMaps() API, a root JsonObject is always retur
 
 If the field of a class is a complex object (it points to another object), then the value associated to the field is another JsonObject (and so on).  
 
-If the field of a class is an array [], then the value is a Map (JsonObject) that contains a key with the name '@items' and the value is an ArrayList containing the values of the array.
+If the field of a class is an array [], then the value is a Map (JsonObject) that contains a key with the name '@items' and the value is an !ArrayList containing the values of the array.
